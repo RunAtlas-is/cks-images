@@ -1,0 +1,7 @@
+all:
+  children:
+    provisioners:
+      hosts:
+        localhost:
+          ansible_connection: local
+    cks_builders: {}  # populated at runtime by the provisioning play
