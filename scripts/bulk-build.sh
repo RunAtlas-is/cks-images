@@ -3,7 +3,7 @@
 # Idempotent: skips versions whose object already exists in the bucket.
 #
 # Usage (on the build VM, creds already sourced):
-#   ./bulk-build-cks-isos.sh 1.33.1 1.33.2 1.34.1 ...
+#   ./bulk-build.sh 1.33.1 1.33.2 1.34.1 ...
 #
 # Required env: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_ENDPOINT_URL,
 # BUCKET_NAME (the export-atlas-s3-env.sh helper provides these).
