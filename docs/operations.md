@@ -23,13 +23,20 @@ checksum.
 ## Artifact Storage
 
 GitHub stores the source, workflow, and static catalog. ISO artifacts live in
-Atlas object storage because GitHub is not a good fit for multi-GB tenant
-installation media.
+S3-compatible object storage because GitHub is not a good fit for multi-GB
+tenant installation media.
 
-CI does not store standalone S3 credentials in GitHub. It uses the `CS_API_KEY`
-and `CS_SECRET_KEY` repository secrets to look up the `atlas-static-assets`
-bucket in CloudStack, exports the bucket's S3 credentials for the current job,
-then uploads or lists objects through `https://s3.runatlas.is`.
+Configure the object store with generic repository secrets:
+
+- `S3_ACCESS_KEY_ID`
+- `S3_SECRET_ACCESS_KEY`
+
+Configure the target with generic repository variables:
+
+- `S3_BUCKET`
+- `S3_ENDPOINT_URL`
+- `S3_PREFIX`
+- `ARTIFACT_BASE_URL`
 
 Current public object paths:
 
@@ -42,19 +49,15 @@ Current public object paths:
 The GitHub Pages catalog is generated from the bucket listing. It does not
 publish index files back into object storage.
 
-## Tenant Availability
+## CloudStack Availability
 
-Freshly built images become available to tenants in two steps:
+The scheduled workflow stops at publishing and indexing artifacts. Registering
+the resulting ISO URLs as CloudStack supported Kubernetes versions is a separate
+integration step covered in [cloudstack-integration.md](cloudstack-integration.md).
 
-1. The workflow uploads the immutable ISO, SHA-256 file, and detached signature
-   to `atlas-static-assets/cks/`.
-2. The workflow registers that exact URL and checksum in CloudStack with
-   `addKubernetesSupportedVersion` for `ATLAS_CLOUDSTACK_ZONE_ID`.
-
-After registration, CloudStack can offer that Kubernetes patch version when a
-tenant creates a new CKS cluster. Existing clusters are not patched
-transparently; upgrade them intentionally through CloudStack's
-`upgradeKubernetesCluster` flow after validation.
+New ISOs should still be treated as immutable once published. When a CloudStack
+operator later registers a URL/checksum pair, changing the object under that URL
+will invalidate the supported-version record.
 
 ## Signing
 
@@ -64,8 +67,8 @@ Kubernetes minor.
 
 Required GitHub secrets:
 
-- `ATLAS_CKS_GPG_PRIVATE_KEY`
-- `ATLAS_CKS_GPG_PASSPHRASE` if the key is passphrase protected
+- `GPG_PRIVATE_KEY`
+- `GPG_PASSPHRASE` if the key is passphrase protected
 
 The public key is committed at `keys/atlas-cloud-artifact-signing.asc` and is
 included in the GitHub Pages artifact. CI also syncs it to object storage at
@@ -93,9 +96,6 @@ export AWS_SECRET_ACCESS_KEY=...
 export S3_BUCKET=atlas-static-assets
 export S3_ENDPOINT_URL=https://s3.runatlas.is
 ```
-
-In CI these values are derived from CloudStack by
-`scripts/export-s3-env.py` before each job step that uses S3.
 
 To refresh signatures/checksums for existing bucket objects:
 

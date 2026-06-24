@@ -32,44 +32,35 @@ passing the target supported-version ID to `upgradeKubernetesCluster`:
 
 <https://cloudstack.apache.org/api/apidocs-4.22/apis/upgradeKubernetesCluster.html>
 
-## CI Registration
+## Manual Registration
 
-The GitHub workflow can register CKS versions automatically after an ISO exists
-in object storage. Configure these repository secrets:
+The scheduled GitHub workflow publishes ISOs and the static catalog only. Use
+this helper manually, or wrap it in your own automation, after an ISO exists in
+object storage. Set these environment variables:
 
-- `CS_API_KEY`
-- `CS_SECRET_KEY`
+- `CLOUDSTACK_ENDPOINT`
+- `CLOUDSTACK_API_KEY`
+- `CLOUDSTACK_SECRET_KEY`
+- `CLOUDSTACK_ZONE_ID`
 
-Configure this repository variable:
+Optional environment variables:
 
-- `ATLAS_CLOUDSTACK_ZONE_ID`
+- `CKS_MIN_CPU`, default `2`
+- `CKS_MIN_MEMORY`, default `2048`
 
-Optional variables:
-
-- `ATLAS_CLOUDSTACK_ENDPOINT`, default `https://sky.runatlas.is/client/api`
-- `ATLAS_CKS_MIN_CPU`, default `2`
-- `ATLAS_CKS_MIN_MEMORY`, default `2048`
-
-The workflow calls:
+Example:
 
 ```bash
 python3 scripts/register-cloudstack-version.py \
   --version 1.33.11 \
   --url "https://s3.runatlas.is/atlas-static-assets/cks/<iso>" \
   --checksum <sha256> \
-  --zone-id <zone-id> \
+  --zone-id "${CLOUDSTACK_ZONE_ID}" \
   --enable-existing
 ```
 
-The same `CS_*` credentials are used to resolve the `atlas-static-assets`
-bucket credentials from CloudStack before the workflow uploads, signs, or lists
-objects. If the zone ID is missing, CI builds and publishes the ISO but skips
-CloudStack supported-version registration with a notice.
+The CloudStack API role behind this account must allow:
 
-The CloudStack API role behind `CS_*` must allow:
-
-- `listBuckets`
-- `listObjectStoragePools`
 - `listKubernetesSupportedVersions`
 - `addKubernetesSupportedVersion`
 - `updateKubernetesSupportedVersion`

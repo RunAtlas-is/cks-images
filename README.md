@@ -1,10 +1,10 @@
 # CKS Images
 
 Build, sign, publish, and index CloudStack Kubernetes Service (CKS) binaries
-ISOs for Atlas Cloud.
+ISOs.
 
 The source of truth for the builder lives in this repository. GitHub Actions
-runs the daily build matrix, stores ISO artifacts in Atlas object storage, and
+runs the daily build matrix, stores ISO artifacts in S3-compatible storage, and
 publishes the static catalog through GitHub Pages.
 
 - Catalog: <https://runatlas-is.github.io/cks-images/>
@@ -22,7 +22,6 @@ publishes the static catalog through GitHub Pages.
 └── scripts/
     ├── build-iso.sh                   build and optionally upload one ISO
     ├── bulk-build.sh                  local helper for multiple versions
-    ├── export-s3-env.py               derive S3 credentials from CloudStack
     ├── register-cloudstack-version.py idempotent CloudStack registration
     └── sign-artifacts.sh              sign bucket ISOs and checksums
 ```
@@ -33,32 +32,30 @@ The scheduled workflow runs daily at 06:00 UTC. It:
 
 1. Resolves the active Kubernetes minor matrix from endoflife.date.
 2. Builds the latest stable patch ISO for each active minor when missing.
-3. Uploads ISOs, SHA-256 files, and detached signatures to Atlas object storage.
+3. Uploads ISOs, SHA-256 files, and detached signatures to S3-compatible
+   object storage.
 4. Regenerates signed `CHECKSUM-<minor>` files.
 5. Builds the static catalog and deploys it to GitHub Pages.
-6. Optionally registers the published ISO as a CloudStack supported Kubernetes
-   version when CloudStack API credentials and a zone ID are configured.
 
 ## Required Secrets
 
 Repository secrets:
 
-- `CS_API_KEY`
-- `CS_SECRET_KEY`
-- `ATLAS_CKS_GPG_PRIVATE_KEY`
-- `ATLAS_CKS_GPG_PASSPHRASE` when the key is passphrase protected
-
-The `CS_*` account is used both for CloudStack registration and to resolve the
-`atlas-static-assets` S3 credentials from CloudStack bucket metadata at runtime.
-The workflow also accepts the legacy `ATLAS_CLOUDSTACK_API_KEY` and
-`ATLAS_CLOUDSTACK_SECRET_KEY` secret names, but `CS_*` is the canonical name.
+- `S3_ACCESS_KEY_ID`
+- `S3_SECRET_ACCESS_KEY`
+- `GPG_PRIVATE_KEY`
+- `GPG_PASSPHRASE` when the key is passphrase protected
 
 Repository variables:
 
-- `ATLAS_CLOUDSTACK_ZONE_ID` enables CloudStack registration.
-- `ATLAS_CLOUDSTACK_ENDPOINT` overrides the default `https://sky.runatlas.is/client/api`.
-- `ATLAS_CKS_MIN_CPU` and `ATLAS_CKS_MIN_MEMORY` override the default supported
-  version constraints (`2`, `2048`).
+- `S3_BUCKET`, default `atlas-static-assets`
+- `S3_ENDPOINT_URL`, default `https://s3.runatlas.is`
+- `S3_PREFIX`, default `cks/`
+- `ARTIFACT_BASE_URL`, default `https://s3.runatlas.is/atlas-static-assets`
+- `SITE_BASE_URL`, default `https://runatlas-is.github.io/cks-images`
+- `DOCS_URL`
+- `GPG_SIGNING_KEY`, default `artifacts@runatlas.is`
+- `GPG_SIGNING_FINGERPRINT`
 
 ## Local Use
 

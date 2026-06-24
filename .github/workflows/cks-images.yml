@@ -25,21 +25,20 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  AWS_ENDPOINT_URL: https://s3.runatlas.is
-  BUCKET_NAME: atlas-static-assets
-  S3_BUCKET: atlas-static-assets
-  S3_ENDPOINT_URL: https://s3.runatlas.is
-  S3_PREFIX: cks/
-  ARTIFACT_BASE_URL: https://s3.runatlas.is/atlas-static-assets
-  SITE_BASE_URL: https://runatlas-is.github.io/cks-images
-  DOCS_URL: https://github.com/RunAtlas-is/cks-images/blob/main/docs/cloudstack-integration.md
-  CLOUDSTACK_ENDPOINT: ${{ vars.ATLAS_CLOUDSTACK_ENDPOINT || 'https://sky.runatlas.is/client/api' }}
-  SIGNING_KEY: artifacts@runatlas.is
-  SIGNING_FINGERPRINT: 4C2D72FDDEF77A5CC4A7D2C421CA4588DCB6991E
-  CNI_VERSION: "1.6.2"
-  CRICTL_VERSION: "1.33.0"
-  HEADLAMP_VERSION: "0.25.0"
-  CNI_YAML_URL: https://raw.githubusercontent.com/projectcalico/calico/v3.29.0/manifests/calico.yaml
+  AWS_ENDPOINT_URL: ${{ vars.S3_ENDPOINT_URL || 'https://s3.runatlas.is' }}
+  BUCKET_NAME: ${{ vars.S3_BUCKET || 'atlas-static-assets' }}
+  S3_BUCKET: ${{ vars.S3_BUCKET || 'atlas-static-assets' }}
+  S3_ENDPOINT_URL: ${{ vars.S3_ENDPOINT_URL || 'https://s3.runatlas.is' }}
+  S3_PREFIX: ${{ vars.S3_PREFIX || 'cks/' }}
+  ARTIFACT_BASE_URL: ${{ vars.ARTIFACT_BASE_URL || 'https://s3.runatlas.is/atlas-static-assets' }}
+  SITE_BASE_URL: ${{ vars.SITE_BASE_URL || 'https://runatlas-is.github.io/cks-images' }}
+  DOCS_URL: ${{ vars.DOCS_URL || 'https://github.com/RunAtlas-is/cks-images/blob/main/docs/operations.md' }}
+  SIGNING_KEY: ${{ vars.GPG_SIGNING_KEY || 'artifacts@runatlas.is' }}
+  SIGNING_FINGERPRINT: ${{ vars.GPG_SIGNING_FINGERPRINT || '4C2D72FDDEF77A5CC4A7D2C421CA4588DCB6991E' }}
+  CNI_VERSION: ${{ vars.CNI_VERSION || '1.6.2' }}
+  CRICTL_VERSION: ${{ vars.CRICTL_VERSION || '1.33.0' }}
+  HEADLAMP_VERSION: ${{ vars.HEADLAMP_VERSION || '0.25.0' }}
+  CNI_YAML_URL: ${{ vars.CNI_YAML_URL || 'https://raw.githubusercontent.com/projectcalico/calico/v3.29.0/manifests/calico.yaml' }}
 
 jobs:
   minors:
@@ -80,46 +79,39 @@ jobs:
       matrix:
         minor: ${{ fromJson(needs.minors.outputs.list) }}
     env:
-      CLOUDSTACK_API_KEY: ${{ secrets.CS_API_KEY || secrets.ATLAS_CLOUDSTACK_API_KEY }}
-      CLOUDSTACK_SECRET_KEY: ${{ secrets.CS_SECRET_KEY || secrets.ATLAS_CLOUDSTACK_SECRET_KEY }}
-      ATLAS_CKS_GPG_PRIVATE_KEY: ${{ secrets.ATLAS_CKS_GPG_PRIVATE_KEY }}
-      GPG_PASSPHRASE: ${{ secrets.ATLAS_CKS_GPG_PASSPHRASE }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID || secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY || secrets.AWS_SECRET_ACCESS_KEY }}
+      GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+      GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
       FORCE_REBUILD: ${{ github.event.inputs.force_rebuild || 'false' }}
-      ATLAS_CLOUDSTACK_ZONE_ID: ${{ vars.ATLAS_CLOUDSTACK_ZONE_ID }}
-      CKS_MIN_CPU: ${{ vars.ATLAS_CKS_MIN_CPU || '2' }}
-      CKS_MIN_MEMORY: ${{ vars.ATLAS_CKS_MIN_MEMORY || '2048' }}
     steps:
       - uses: actions/checkout@v7
 
       - name: Validate required secrets
         run: |
           set -euo pipefail
-          test -n "${CLOUDSTACK_API_KEY}" || { echo "CS_API_KEY is missing" >&2; exit 1; }
-          test -n "${CLOUDSTACK_SECRET_KEY}" || { echo "CS_SECRET_KEY is missing" >&2; exit 1; }
-          test -n "${ATLAS_CKS_GPG_PRIVATE_KEY}" || { echo "ATLAS_CKS_GPG_PRIVATE_KEY is missing" >&2; exit 1; }
+          test -n "${AWS_ACCESS_KEY_ID}" || { echo "S3_ACCESS_KEY_ID is missing" >&2; exit 1; }
+          test -n "${AWS_SECRET_ACCESS_KEY}" || { echo "S3_SECRET_ACCESS_KEY is missing" >&2; exit 1; }
+          test -n "${GPG_PRIVATE_KEY}" || { echo "GPG_PRIVATE_KEY is missing" >&2; exit 1; }
 
       - name: Install prerequisites
         run: |
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            ca-certificates containerd curl genisoimage gnupg jq python3-pip unzip
-          python3 -m pip install --user --break-system-packages cs
+            ca-certificates containerd curl genisoimage gnupg jq unzip
           if ! command -v aws >/dev/null 2>&1; then
             curl -fsSL https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o /tmp/awscliv2.zip
             unzip -q /tmp/awscliv2.zip -d /tmp
             sudo /tmp/aws/install --update
           fi
 
-      - name: Resolve Atlas object-storage credentials
-        run: python3 scripts/export-s3-env.py --bucket "${BUCKET_NAME}"
-
       - name: Import signing key
         run: |
           set -euo pipefail
           export GNUPGHOME="${RUNNER_TEMP}/gnupg"
           mkdir -m 700 -p "$GNUPGHOME"
-          printf '%s' "${ATLAS_CKS_GPG_PRIVATE_KEY}" | gpg --batch --import
+          printf '%s' "${GPG_PRIVATE_KEY}" | gpg --batch --import
           echo "GNUPGHOME=$GNUPGHOME" >> "$GITHUB_ENV"
 
       - name: Ensure containerd is running
@@ -199,28 +191,14 @@ jobs:
           fi
           echo "value=$checksum" >> "$GITHUB_OUTPUT"
 
-      - name: Register CloudStack supported version
-        run: |
-          set -euo pipefail
-          if [[ -z "${ATLAS_CLOUDSTACK_ZONE_ID}" ]]; then
-            echo "::notice::CloudStack registration skipped; configure ATLAS_CLOUDSTACK_ZONE_ID."
-            exit 0
-          fi
-          python3 scripts/register-cloudstack-version.py \
-            --version "${{ steps.version.outputs.k8s_version }}" \
-            --url "${ARTIFACT_BASE_URL}/${{ steps.version.outputs.object_key }}" \
-            --checksum "${{ steps.checksum.outputs.value }}" \
-            --zone-id "${ATLAS_CLOUDSTACK_ZONE_ID}" \
-            --enable-existing
-
   sign:
     needs: build
     runs-on: ubuntu-24.04
     env:
-      CLOUDSTACK_API_KEY: ${{ secrets.CS_API_KEY || secrets.ATLAS_CLOUDSTACK_API_KEY }}
-      CLOUDSTACK_SECRET_KEY: ${{ secrets.CS_SECRET_KEY || secrets.ATLAS_CLOUDSTACK_SECRET_KEY }}
-      ATLAS_CKS_GPG_PRIVATE_KEY: ${{ secrets.ATLAS_CKS_GPG_PRIVATE_KEY }}
-      GPG_PASSPHRASE: ${{ secrets.ATLAS_CKS_GPG_PASSPHRASE }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID || secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY || secrets.AWS_SECRET_ACCESS_KEY }}
+      GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+      GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
     steps:
       - uses: actions/checkout@v7
 
@@ -228,26 +206,22 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ca-certificates curl gnupg jq python3-pip unzip
-          python3 -m pip install --user --break-system-packages cs
+          sudo apt-get install -y --no-install-recommends ca-certificates curl gnupg jq unzip
           if ! command -v aws >/dev/null 2>&1; then
             curl -fsSL https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o /tmp/awscliv2.zip
             unzip -q /tmp/awscliv2.zip -d /tmp
             sudo /tmp/aws/install --update
           fi
 
-      - name: Resolve Atlas object-storage credentials
-        run: python3 scripts/export-s3-env.py --bucket "${BUCKET_NAME}"
-
       - name: Import signing key
         run: |
           set -euo pipefail
-          test -n "${CLOUDSTACK_API_KEY}" || { echo "CS_API_KEY is missing" >&2; exit 1; }
-          test -n "${CLOUDSTACK_SECRET_KEY}" || { echo "CS_SECRET_KEY is missing" >&2; exit 1; }
-          test -n "${ATLAS_CKS_GPG_PRIVATE_KEY}" || { echo "ATLAS_CKS_GPG_PRIVATE_KEY is missing" >&2; exit 1; }
+          test -n "${AWS_ACCESS_KEY_ID}" || { echo "S3_ACCESS_KEY_ID is missing" >&2; exit 1; }
+          test -n "${AWS_SECRET_ACCESS_KEY}" || { echo "S3_SECRET_ACCESS_KEY is missing" >&2; exit 1; }
+          test -n "${GPG_PRIVATE_KEY}" || { echo "GPG_PRIVATE_KEY is missing" >&2; exit 1; }
           export GNUPGHOME="${RUNNER_TEMP}/gnupg"
           mkdir -m 700 -p "$GNUPGHOME"
-          printf '%s' "${ATLAS_CKS_GPG_PRIVATE_KEY}" | gpg --batch --import
+          printf '%s' "${GPG_PRIVATE_KEY}" | gpg --batch --import
           echo "GNUPGHOME=$GNUPGHOME" >> "$GITHUB_ENV"
 
       - name: Sign artifacts and regenerate checksums
@@ -270,19 +244,17 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     env:
-      CLOUDSTACK_API_KEY: ${{ secrets.CS_API_KEY || secrets.ATLAS_CLOUDSTACK_API_KEY }}
-      CLOUDSTACK_SECRET_KEY: ${{ secrets.CS_SECRET_KEY || secrets.ATLAS_CLOUDSTACK_SECRET_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID || secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY || secrets.AWS_SECRET_ACCESS_KEY }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/configure-pages@v6
 
-      - name: Resolve Atlas object-storage credentials
+      - name: Validate required secrets
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ca-certificates python3-pip
-          python3 -m pip install --user --break-system-packages cs
-          python3 scripts/export-s3-env.py --bucket "${BUCKET_NAME}"
+          test -n "${AWS_ACCESS_KEY_ID}" || { echo "S3_ACCESS_KEY_ID is missing" >&2; exit 1; }
+          test -n "${AWS_SECRET_ACCESS_KEY}" || { echo "S3_SECRET_ACCESS_KEY is missing" >&2; exit 1; }
 
       - name: Install Bun
         run: |

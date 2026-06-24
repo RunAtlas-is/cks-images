@@ -19,6 +19,7 @@ import {
 } from "@aws-sdk/client-s3";
 import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const need = (k: string): string => {
   const v = process.env[k];
@@ -41,7 +42,7 @@ const KEY_PATH = "keys/atlas-cloud-artifact-signing.asc";
 const SIGNING_FINGERPRINT =
   process.env.SIGNING_FINGERPRINT ?? "4C2D72FDDEF77A5CC4A7D2C421CA4588DCB6991E";
 
-const HERE = dirname(new URL(import.meta.url).pathname);
+const HERE = dirname(fileURLToPath(import.meta.url));
 const DIST = process.env.DIST_DIR ?? join(HERE, "dist");
 const BRANDING = join(HERE, "assets");
 const KEY_SOURCE = join(HERE, "..", KEY_PATH);

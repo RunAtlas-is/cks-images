@@ -21,9 +21,6 @@ except ImportError as exc:  # pragma: no cover - exercised in CI shell, not unit
     sys.exit("Missing dependency: pip install cs")
 
 
-DEFAULT_ENDPOINT = "https://sky.runatlas.is/client/api"
-
-
 def required_env(name: str) -> str:
     value = os.environ.get(name)
     if not value:
@@ -67,7 +64,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    endpoint = os.environ.get("CLOUDSTACK_ENDPOINT", DEFAULT_ENDPOINT)
+    endpoint = required_env("CLOUDSTACK_ENDPOINT")
     api_key = required_env("CLOUDSTACK_API_KEY")
     secret_key = required_env("CLOUDSTACK_SECRET_KEY")
     cs = CloudStack(endpoint=endpoint, key=api_key, secret=secret_key, timeout=120)
