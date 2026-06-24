@@ -41,6 +41,16 @@ def supported_versions(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return []
 
 
+def allowed_api_names(cs: CloudStack) -> set[str]:
+    payload = cs.listApis()
+    apis = payload.get("api")
+    if isinstance(apis, dict):
+        apis = [apis]
+    if not isinstance(apis, list):
+        return set()
+    return {str(item.get("name")) for item in apis if isinstance(item, dict) and item.get("name")}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--version", required=True, help="Kubernetes semantic version, e.g. 1.33.11")
@@ -62,7 +72,18 @@ def main() -> None:
     secret_key = required_env("CLOUDSTACK_SECRET_KEY")
     cs = CloudStack(endpoint=endpoint, key=api_key, secret=secret_key, timeout=120)
 
-    existing = supported_versions(cs.listKubernetesSupportedVersion(listall=True))
+    required_apis = {"listKubernetesSupportedVersions", "addKubernetesSupportedVersion"}
+    if args.enable_existing:
+        required_apis.add("updateKubernetesSupportedVersion")
+    allowed_apis = allowed_api_names(cs)
+    missing_apis = sorted(required_apis - allowed_apis)
+    if missing_apis:
+        sys.exit(
+            "CloudStack API role is missing required commands: "
+            + ", ".join(missing_apis)
+        )
+
+    existing = supported_versions(cs.listKubernetesSupportedVersions(listall=True))
     for item in existing:
         same_version = item.get("semanticversion") == args.version
         same_zone = item.get("zoneid") == args.zone_id

@@ -5,7 +5,7 @@ know which ISO URLs are supported for tenant Kubernetes clusters.
 
 Apache CloudStack documents this as the CKS supported-version registry:
 `addKubernetesSupportedVersion` registers an ISO URL, semantic version, checksum,
-zone, and minimum resources; `listKubernetesSupportedVersion` lists registered
+zone, and minimum resources; `listKubernetesSupportedVersions` lists registered
 versions; `updateKubernetesSupportedVersion` enables or disables an existing
 version. See the upstream CloudStack Kubernetes Service docs:
 
@@ -65,6 +65,14 @@ The same `CS_*` credentials are used to resolve the `atlas-static-assets`
 bucket credentials from CloudStack before the workflow uploads, signs, or lists
 objects. If the zone ID is missing, CI builds and publishes the ISO but skips
 CloudStack supported-version registration with a notice.
+
+The CloudStack API role behind `CS_*` must allow:
+
+- `listBuckets`
+- `listObjectStoragePools`
+- `listKubernetesSupportedVersions`
+- `addKubernetesSupportedVersion`
+- `updateKubernetesSupportedVersion`
 
 ## Tenant API Endpoint
 
