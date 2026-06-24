@@ -15,6 +15,7 @@
 #   SIGNING_KEY       fingerprint or uid of the key to use
 #                     (default: artifacts@runatlas.is)
 #   GNUPGHOME         keyring location (default: $HOME/.gnupg-atlas)
+#   GPG_PASSPHRASE    optional passphrase for SIGNING_KEY in CI
 
 set -euo pipefail
 
@@ -26,15 +27,18 @@ set -euo pipefail
 SIGNING_KEY="${SIGNING_KEY:-artifacts@runatlas.is}"
 export GNUPGHOME="${GNUPGHOME:-$HOME/.gnupg-atlas}"
 
-# Serialise against a concurrent publish-index.ts run so the two don't race
-# on cks/index.html + CHECKSUM-* uploads. If the lock can't be acquired in
+# Serialise checksum/signature publication. If the lock can't be acquired in
 # 5 minutes, bail loudly.
-LOCK_FILE="${SIGN_LOCK_FILE:-/var/lock/cks-publish.lock}"
+LOCK_FILE="${SIGN_LOCK_FILE:-${RUNNER_TEMP:-/tmp}/cks-publish.lock}"
 if [[ -z "${SIGN_FLOCK_ACQUIRED:-}" ]]; then
   exec env SIGN_FLOCK_ACQUIRED=1 flock -w 300 "$LOCK_FILE" "$0" "$@"
 fi
 
 aws_opts=(--endpoint-url "$AWS_ENDPOINT_URL")
+gpg_args=(--batch --yes --local-user "$SIGNING_KEY")
+if [[ -n "${GPG_PASSPHRASE:-}" ]]; then
+  gpg_args+=(--pinentry-mode loopback --passphrase "$GPG_PASSPHRASE")
+fi
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
@@ -75,7 +79,7 @@ for iso in "${isos[@]}"; do
   fi
   echo "[sign] ${iso}"
   aws "${aws_opts[@]}" s3 cp "s3://${BUCKET_NAME}/cks/${iso}" "$tmp/download/${iso}" --only-show-errors
-  gpg --batch --yes --local-user "$SIGNING_KEY" \
+  gpg "${gpg_args[@]}" \
       --armor --detach-sign \
       --output "$tmp/download/${asc}" \
       "$tmp/download/${iso}"
@@ -112,7 +116,7 @@ for minor in "${!minor_isos[@]}"; do
     done <<< "${minor_isos[$minor]}"
   } > "$tmp/${checksum}"
 
-  gpg --batch --yes --local-user "$SIGNING_KEY" \
+  gpg "${gpg_args[@]}" \
       --armor --detach-sign \
       --output "$tmp/${checksum}.asc" \
       "$tmp/${checksum}"

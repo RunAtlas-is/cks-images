@@ -7,7 +7,9 @@
 //   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_ENDPOINT_URL, BUCKET_NAME
 //     required (read-only)
 //   DOCS_URL                  link shown in the header + footer
-//   PUBLIC_BASE               base URL used in the verify snippet
+//   ARTIFACT_BASE_URL         public base URL for objects in BUCKET_NAME
+//   SITE_BASE_URL             public base URL for this GitHub Pages site
+//   KEY_URL                   public URL for the artifact signing key
 //   SIGNING_FINGERPRINT       Atlas artifact key fingerprint (display only)
 
 import {
@@ -30,14 +32,19 @@ const AWS_ENDPOINT_URL = need("AWS_ENDPOINT_URL");
 const BUCKET = need("BUCKET_NAME");
 const DOCS_URL =
   process.env.DOCS_URL ??
-  "https://docs.runatlas.is/Atlas+Docs/Tutorials/Deploying+Kubernetes+on+Atlas";
-const PUBLIC_BASE = process.env.PUBLIC_BASE ?? "https://download.runatlas.is";
+  "https://github.com/RunAtlas-is/cks-images/blob/main/docs/cloudstack-integration.md";
+const ARTIFACT_BASE_URL =
+  process.env.ARTIFACT_BASE_URL ?? "https://s3.runatlas.is/atlas-static-assets";
+const SITE_BASE_URL =
+  process.env.SITE_BASE_URL ?? "https://runatlas-is.github.io/cks-images";
+const KEY_PATH = "keys/atlas-cloud-artifact-signing.asc";
 const SIGNING_FINGERPRINT =
   process.env.SIGNING_FINGERPRINT ?? "4C2D72FDDEF77A5CC4A7D2C421CA4588DCB6991E";
 
 const HERE = dirname(new URL(import.meta.url).pathname);
 const DIST = process.env.DIST_DIR ?? join(HERE, "dist");
-const BRANDING = join(HERE, "..", "traefik", "branding");
+const BRANDING = join(HERE, "assets");
+const KEY_SOURCE = join(HERE, "..", KEY_PATH);
 
 const s3 = new S3Client({
   region: "us-east-1",
@@ -132,6 +139,23 @@ function escape(s: string): string {
     .replace(/"/g, "&quot;");
 }
 
+function joinUrl(base: string, path: string): string {
+  const trimmedBase = base.replace(/\/+$/, "");
+  const encodedPath = path
+    .replace(/^\/+/, "")
+    .split("/")
+    .filter(Boolean)
+    .map(encodeURIComponent)
+    .join("/");
+  return encodedPath ? `${trimmedBase}/${encodedPath}` : `${trimmedBase}/`;
+}
+
+function artifactHref(key: string): string {
+  return joinUrl(ARTIFACT_BASE_URL, key);
+}
+
+const KEY_URL = process.env.KEY_URL ?? joinUrl(SITE_BASE_URL, KEY_PATH);
+
 function formatTimestamp(d: Date): string {
   const iso = d.toISOString();
   return `${iso.slice(0, 10)} ${iso.slice(11, 16)}`;
@@ -208,17 +232,17 @@ function renderHtml(args: {
       const subLinks: string[] = [];
       if (sha) {
         subLinks.push(
-          `<a class="sub" href="/cks/${escape(e.name)}.sha256" title="${escape(sha)}">sha</a>`,
+          `<a class="sub" href="${escape(artifactHref(`cks/${e.name}.sha256`))}" title="${escape(sha)}">sha</a>`,
         );
       }
       if (hasAsc) {
-        subLinks.push(`<a class="sub" href="/cks/${escape(e.name)}.asc">.asc</a>`);
+        subLinks.push(`<a class="sub" href="${escape(artifactHref(`cks/${e.name}.asc`))}">.asc</a>`);
       }
       const subBlock = subLinks.length ? ` <span class="sub">(${subLinks.join(", ")})</span>` : "";
       rows.push(
         `<tr>` +
           `<td>&#x1F4BE;</td>` +
-          `<td data-sort="${iso.sortKey}"><a href="/cks/${escape(e.name)}">${escape(e.name)}</a>${subBlock}</td>` +
+          `<td data-sort="${iso.sortKey}"><a href="${escape(artifactHref(`cks/${e.name}`))}">${escape(e.name)}</a>${subBlock}</td>` +
           `<td data-sort="${escape(iso.arch)}">${escape(iso.arch)}</td>` +
           `<td data-sort="${modSort}" align="right">${escape(modH)}</td>` +
           `<td data-sort="${e.size}" align="right"><tt>${sizeH}</tt></td>` +
@@ -230,7 +254,7 @@ function renderHtml(args: {
       rows.push(
         `<tr>` +
           `<td>&#x1F4C4;</td>` +
-          `<td data-sort="${escape(e.name)}"><a href="/cks/${escape(e.name)}">${escape(e.name)}</a></td>` +
+          `<td data-sort="${escape(e.name)}"><a href="${escape(artifactHref(`cks/${e.name}`))}">${escape(e.name)}</a></td>` +
           `<td data-sort="">&mdash;</td>` +
           `<td data-sort="${modSort}" align="right">${escape(modH)}</td>` +
           `<td data-sort="${e.size}" align="right"><tt>${sizeH}</tt></td>` +
@@ -247,7 +271,7 @@ function renderHtml(args: {
 <html>
  <head>
   <title>Index of /cks</title>
-  <link rel="icon" href="/cks/favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <style>
     body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; margin: 1.5rem; }
     header { display: flex; align-items: center; gap: 0.9rem; margin-bottom: 0.6rem; }
@@ -274,7 +298,7 @@ function renderHtml(args: {
  </head>
  <body>
 <header>
-  <a href="https://runatlas.is"><img src="/cks/logo.svg" alt="Atlas Cloud"></a>
+  <a href="https://runatlas.is"><img src="logo.svg" alt="Atlas Cloud"></a>
   <h1>Index of /cks</h1>
 </header>
 <p>CloudStack Kubernetes Service binary ISOs for Atlas Cloud. Each <code>.iso</code> has a sibling SHA-256 and a GPG detached signature (collapsed into the filename as <code>(sha, .asc)</code>). Per-minor <code>CHECKSUM-&lt;minor&gt;</code> files are clearsigned with the Atlas signing key. See the <a href="${escape(DOCS_URL)}">deploy tutorial</a>; support dates follow the official <a href="https://kubernetes.io/releases/patch-releases/">Kubernetes policy</a>.</p>
@@ -285,18 +309,18 @@ function renderHtml(args: {
       ? minorsWithChecksum
           .map(
             (m) =>
-              `<a href="/cks/CHECKSUM-${escape(m)}">CHECKSUM-${escape(m)}</a> <span class="sub">(<a href="/cks/CHECKSUM-${escape(m)}.asc">.asc</a>)</span>`,
+              `<a href="${escape(artifactHref(`cks/CHECKSUM-${m}`))}">CHECKSUM-${escape(m)}</a> <span class="sub">(<a href="${escape(artifactHref(`cks/CHECKSUM-${m}.asc`))}">.asc</a>)</span>`,
           )
           .join(" &middot; ")
       : "<em>no checksum files yet</em>"}
-<pre>curl -sO ${PUBLIC_BASE}/keys/atlas-cloud-artifact-signing.asc && gpg --import atlas-cloud-artifact-signing.asc
-curl -sO ${PUBLIC_BASE}/cks/CHECKSUM-1.33
-curl -sO ${PUBLIC_BASE}/cks/CHECKSUM-1.33.asc
+<pre>curl -sO ${escape(KEY_URL)} && gpg --import atlas-cloud-artifact-signing.asc
+curl -sO ${escape(artifactHref("cks/CHECKSUM-1.33"))}
+curl -sO ${escape(artifactHref("cks/CHECKSUM-1.33.asc"))}
 gpg --verify CHECKSUM-1.33.asc CHECKSUM-1.33
 sha256sum --check --ignore-missing CHECKSUM-1.33</pre>
   </div>
   <div class="fpr">
-    <a href="/keys/atlas-cloud-artifact-signing.asc">KEY.asc</a><br>
+    <a href="${escape(KEY_URL)}">KEY.asc</a><br>
     Atlas Cloud signing<br>
     ${formatFingerprint(SIGNING_FINGERPRINT)}
   </div>
@@ -316,7 +340,7 @@ sha256sum --check --ignore-missing CHECKSUM-1.33</pre>
 <tr><th colspan="7"><hr></th></tr>
 </thead>
 <tbody>
-<tr><td>&nbsp;</td><td><a href="/">Parent Directory</a></td><td>&mdash;</td><td>&nbsp;</td><td align="right">-</td><td>&nbsp;</td><td>&nbsp;</td></tr>
+<tr data-role="bucket"><td>&nbsp;</td><td><a href="${escape(artifactHref(""))}">Artifact bucket</a></td><td>&mdash;</td><td>&nbsp;</td><td align="right">-</td><td>&nbsp;</td><td>&nbsp;</td></tr>
 ${rows.join("\n")}
 </tbody>
 <tfoot><tr><th colspan="7"><hr></th></tr></tfoot>
@@ -328,7 +352,7 @@ ${rows.join("\n")}
   const table = document.getElementById('idx');
   const tbody = table.querySelector('tbody');
   const headers = Array.from(table.querySelectorAll('thead th[data-col]'));
-  const isParent = (row) => row.querySelector('a[href="/"]') !== null;
+  const isPinned = (row) => row.dataset.role === 'bucket';
   let dir = { col: 1, asc: false };
   const numericRe = /^-?\\d+(?:\\.\\d+)?$/;
   const cmp = (a, b) => {
@@ -340,8 +364,8 @@ ${rows.join("\n")}
     if (dir.col == null) return;
     headers[dir.col].querySelector('.arrow').textContent = dir.asc ? '▲' : '▼';
     const rows = Array.from(tbody.querySelectorAll('tr'));
-    const parent = rows.find(isParent);
-    const body = rows.filter(r => !isParent(r));
+    const parent = rows.find(isPinned);
+    const body = rows.filter(r => !isPinned(r));
     body.sort((r1, r2) => {
       const c1 = r1.children[dir.col], c2 = r2.children[dir.col];
       const k1 = c1?.dataset.sort ?? c1?.textContent ?? '';
@@ -398,13 +422,18 @@ async function main() {
 
   mkdirSync(DIST, { recursive: true });
   writeFileSync(join(DIST, "index.html"), html);
-  // Copy branding assets verbatim so `publish` can stay generic.
+  // Copy static assets verbatim into the Pages artifact.
   for (const asset of ["favicon.svg", "logo.svg"]) {
     writeFileSync(join(DIST, asset), readFileSync(join(BRANDING, asset)));
   }
+  mkdirSync(join(DIST, "keys"), { recursive: true });
+  writeFileSync(
+    join(DIST, KEY_PATH),
+    readFileSync(KEY_SOURCE),
+  );
 
   const isoCount = entries.filter((e) => parseIso(e.key.replace(/^cks\//, ""))).length;
-  console.log(`[build] wrote ${DIST}/index.html (${html.length} bytes, ${isoCount} ISOs) + ${2} branding assets`);
+  console.log(`[build] wrote ${DIST}/index.html (${html.length} bytes, ${isoCount} ISOs) + Pages assets`);
 }
 
 await main();

@@ -1,0 +1,20 @@
+# Local build output
+output/
+index/dist/
+
+# Local credentials and caches
+.env
+.env.*
+.aws/
+.gnupg/
+.cache/
+
+# Editor and OS noise
+.DS_Store
+Thumbs.db
+*.swp
+*.tmp
+
+# Dependency directories
+node_modules/
+__pycache__/

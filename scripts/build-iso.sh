@@ -20,6 +20,7 @@
 #   S3_BUCKET             upload target; skip upload if unset
 #   S3_ENDPOINT_URL       e.g. https://s3.runatlas.is
 #   S3_PREFIX             key prefix inside bucket (default: cks/)
+#   GPG_PASSPHRASE        optional passphrase for SIGNING_KEY in CI
 
 set -euo pipefail
 
@@ -75,10 +76,14 @@ sha256sum "$iso_path" > "${iso_path}.sha256"
 # GPG-sign the ISO if a signing keyring is available. Requires either a
 # pre-imported key in GNUPGHOME or the default gnupg dir with the Atlas key.
 if [[ -n "${SIGNING_KEY:-}" ]] && gpg --batch --list-secret-keys "$SIGNING_KEY" >/dev/null 2>&1; then
-  gpg --batch --yes --local-user "$SIGNING_KEY" \
-      --armor --detach-sign \
-      --output "${iso_path}.asc" \
-      "$iso_path"
+  gpg_args=(--batch --yes --local-user "$SIGNING_KEY")
+  if [[ -n "${GPG_PASSPHRASE:-}" ]]; then
+    gpg_args+=(--pinentry-mode loopback --passphrase "$GPG_PASSPHRASE")
+  fi
+  gpg "${gpg_args[@]}" \
+    --armor --detach-sign \
+    --output "${iso_path}.asc" \
+    "$iso_path"
   echo ">> Signed $iso_path → ${iso_path}.asc"
 fi
 

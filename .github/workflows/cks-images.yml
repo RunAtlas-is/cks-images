@@ -1,0 +1,291 @@
+name: CKS images
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+    inputs:
+      k8s_minor:
+        description: Kubernetes minor, for example 1.33. Leave blank to build the active matrix.
+        required: false
+        type: string
+      force_rebuild:
+        description: Rebuild even if the object already exists.
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: cks-images
+  cancel-in-progress: false
+
+env:
+  AWS_ENDPOINT_URL: https://s3.runatlas.is
+  BUCKET_NAME: atlas-static-assets
+  S3_BUCKET: atlas-static-assets
+  S3_ENDPOINT_URL: https://s3.runatlas.is
+  S3_PREFIX: cks/
+  ARTIFACT_BASE_URL: https://s3.runatlas.is/atlas-static-assets
+  SITE_BASE_URL: https://runatlas-is.github.io/cks-images
+  DOCS_URL: https://github.com/RunAtlas-is/cks-images/blob/main/docs/cloudstack-integration.md
+  SIGNING_KEY: artifacts@runatlas.is
+  SIGNING_FINGERPRINT: 4C2D72FDDEF77A5CC4A7D2C421CA4588DCB6991E
+  CNI_VERSION: "1.6.2"
+  CRICTL_VERSION: "1.33.0"
+  HEADLAMP_VERSION: "0.25.0"
+  CNI_YAML_URL: https://raw.githubusercontent.com/projectcalico/calico/v3.29.0/manifests/calico.yaml
+
+jobs:
+  minors:
+    runs-on: ubuntu-24.04
+    outputs:
+      list: ${{ steps.resolve.outputs.list }}
+    steps:
+      - name: Resolve active Kubernetes minors
+        id: resolve
+        env:
+          REQUESTED_MINOR: ${{ github.event.inputs.k8s_minor }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${REQUESTED_MINOR}" ]]; then
+            jq -cn --arg minor "${REQUESTED_MINOR}" '[$minor]' | sed 's/^/list=/' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          today="$(date -u +%Y-%m-%d)"
+          json="$(curl -fsSL --max-time 15 https://endoflife.date/api/kubernetes.json)"
+          minors="$(jq -c --arg today "$today" '
+            [.[] | select(.eol != null and .eol >= $today) | .cycle]
+            | sort_by(split(".") | map(tonumber))
+            | reverse[0:4]
+          ' <<<"$json")"
+          if [[ "$minors" == "[]" ]]; then
+            echo "No active Kubernetes minors resolved from endoflife.date" >&2
+            exit 1
+          fi
+          echo "list=$minors" >> "$GITHUB_OUTPUT"
+          echo "Selected minors: $minors"
+
+  build:
+    needs: minors
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        minor: ${{ fromJson(needs.minors.outputs.list) }}
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.ATLAS_S3_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.ATLAS_S3_SECRET_ACCESS_KEY }}
+      ATLAS_CKS_GPG_PRIVATE_KEY: ${{ secrets.ATLAS_CKS_GPG_PRIVATE_KEY }}
+      GPG_PASSPHRASE: ${{ secrets.ATLAS_CKS_GPG_PASSPHRASE }}
+      FORCE_REBUILD: ${{ github.event.inputs.force_rebuild || 'false' }}
+      CLOUDSTACK_API_KEY: ${{ secrets.ATLAS_CLOUDSTACK_API_KEY }}
+      CLOUDSTACK_SECRET_KEY: ${{ secrets.ATLAS_CLOUDSTACK_SECRET_KEY }}
+      CLOUDSTACK_ENDPOINT: ${{ vars.ATLAS_CLOUDSTACK_ENDPOINT || 'https://sky.runatlas.is/client/api' }}
+      ATLAS_CLOUDSTACK_ZONE_ID: ${{ vars.ATLAS_CLOUDSTACK_ZONE_ID }}
+      CKS_MIN_CPU: ${{ vars.ATLAS_CKS_MIN_CPU || '2' }}
+      CKS_MIN_MEMORY: ${{ vars.ATLAS_CKS_MIN_MEMORY || '2048' }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Validate required secrets
+        run: |
+          set -euo pipefail
+          test -n "${AWS_ACCESS_KEY_ID}" || { echo "ATLAS_S3_ACCESS_KEY_ID is missing" >&2; exit 1; }
+          test -n "${AWS_SECRET_ACCESS_KEY}" || { echo "ATLAS_S3_SECRET_ACCESS_KEY is missing" >&2; exit 1; }
+          test -n "${ATLAS_CKS_GPG_PRIVATE_KEY}" || { echo "ATLAS_CKS_GPG_PRIVATE_KEY is missing" >&2; exit 1; }
+
+      - name: Install prerequisites
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ca-certificates containerd curl genisoimage gnupg jq unzip
+          if ! command -v aws >/dev/null 2>&1; then
+            curl -fsSL https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o /tmp/awscliv2.zip
+            unzip -q /tmp/awscliv2.zip -d /tmp
+            sudo /tmp/aws/install --update
+          fi
+
+      - name: Import signing key
+        run: |
+          set -euo pipefail
+          export GNUPGHOME="${RUNNER_TEMP}/gnupg"
+          mkdir -m 700 -p "$GNUPGHOME"
+          printf '%s' "${ATLAS_CKS_GPG_PRIVATE_KEY}" | gpg --batch --import
+          echo "GNUPGHOME=$GNUPGHOME" >> "$GITHUB_ENV"
+
+      - name: Ensure containerd is running
+        run: |
+          set -euo pipefail
+          if [[ ! -S /run/containerd/containerd.sock ]]; then
+            sudo systemctl start containerd
+          fi
+          sudo ctr version
+
+      - name: Resolve latest patch for ${{ matrix.minor }}
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          latest="$(
+            curl -fsSL \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              "https://api.github.com/repos/kubernetes/kubernetes/releases?per_page=100" \
+            | jq -r --arg minor "v${{ matrix.minor }}." '
+                [.[] | select(.prerelease == false) | select(.tag_name | startswith($minor))]
+                | sort_by(.tag_name | ltrimstr("v") | split(".") | map(tonumber))
+                | last
+                | .tag_name
+              ' \
+            | tr -d 'v'
+          )"
+          if [[ -z "$latest" || "$latest" == "null" ]]; then
+            echo "No stable release found for ${{ matrix.minor }}" >&2
+            exit 1
+          fi
+          echo "k8s_version=$latest" >> "$GITHUB_OUTPUT"
+          echo "object_key=cks/setup-v${latest}-calico-amd64-x86_64.iso" >> "$GITHUB_OUTPUT"
+
+      - name: Check existing object
+        id: existing
+        run: |
+          set -euo pipefail
+          if [[ "${FORCE_REBUILD}" == "true" ]]; then
+            echo "already_built=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          set +e
+          out="$(aws --endpoint-url "${AWS_ENDPOINT_URL}" s3api head-object \
+            --bucket "${BUCKET_NAME}" --key "${{ steps.version.outputs.object_key }}" 2>&1)"
+          rc=$?
+          set -e
+          if [[ $rc -eq 0 ]]; then
+            echo "already_built=true" >> "$GITHUB_OUTPUT"
+          elif [[ "$out" == *"Not Found"* || "$out" == *"NoSuchKey"* || "$out" == *"404"* ]]; then
+            echo "already_built=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "head-object failed for ${{ steps.version.outputs.object_key }} (rc=$rc): $out" >&2
+            exit 1
+          fi
+
+      - name: Build and upload ISO
+        if: steps.existing.outputs.already_built != 'true'
+        env:
+          K8S_VERSION: ${{ steps.version.outputs.k8s_version }}
+        run: ./scripts/build-iso.sh
+
+      - name: Fetch ISO checksum
+        id: checksum
+        run: |
+          set -euo pipefail
+          checksum="$(
+            aws --endpoint-url "${AWS_ENDPOINT_URL}" s3 cp \
+              "s3://${BUCKET_NAME}/${{ steps.version.outputs.object_key }}.sha256" - \
+            | awk '{print $1}'
+          )"
+          if [[ ! "$checksum" =~ ^[0-9a-fA-F]{64}$ ]]; then
+            echo "Invalid checksum for ${{ steps.version.outputs.object_key }}: $checksum" >&2
+            exit 1
+          fi
+          echo "value=$checksum" >> "$GITHUB_OUTPUT"
+
+      - name: Register CloudStack supported version
+        run: |
+          set -euo pipefail
+          if [[ -z "${CLOUDSTACK_API_KEY}" || -z "${CLOUDSTACK_SECRET_KEY}" || -z "${ATLAS_CLOUDSTACK_ZONE_ID}" ]]; then
+            echo "::notice::CloudStack registration skipped; configure ATLAS_CLOUDSTACK_API_KEY, ATLAS_CLOUDSTACK_SECRET_KEY, and ATLAS_CLOUDSTACK_ZONE_ID."
+            exit 0
+          fi
+          python3 -m pip install --user cs
+          python3 scripts/register-cloudstack-version.py \
+            --version "${{ steps.version.outputs.k8s_version }}" \
+            --url "${ARTIFACT_BASE_URL}/${{ steps.version.outputs.object_key }}" \
+            --checksum "${{ steps.checksum.outputs.value }}" \
+            --zone-id "${ATLAS_CLOUDSTACK_ZONE_ID}" \
+            --enable-existing
+
+  sign:
+    needs: build
+    runs-on: ubuntu-24.04
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.ATLAS_S3_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.ATLAS_S3_SECRET_ACCESS_KEY }}
+      ATLAS_CKS_GPG_PRIVATE_KEY: ${{ secrets.ATLAS_CKS_GPG_PRIVATE_KEY }}
+      GPG_PASSPHRASE: ${{ secrets.ATLAS_CKS_GPG_PASSPHRASE }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install prerequisites
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ca-certificates curl gnupg jq unzip
+          if ! command -v aws >/dev/null 2>&1; then
+            curl -fsSL https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o /tmp/awscliv2.zip
+            unzip -q /tmp/awscliv2.zip -d /tmp
+            sudo /tmp/aws/install --update
+          fi
+
+      - name: Import signing key
+        run: |
+          set -euo pipefail
+          test -n "${ATLAS_CKS_GPG_PRIVATE_KEY}" || { echo "ATLAS_CKS_GPG_PRIVATE_KEY is missing" >&2; exit 1; }
+          export GNUPGHOME="${RUNNER_TEMP}/gnupg"
+          mkdir -m 700 -p "$GNUPGHOME"
+          printf '%s' "${ATLAS_CKS_GPG_PRIVATE_KEY}" | gpg --batch --import
+          echo "GNUPGHOME=$GNUPGHOME" >> "$GITHUB_ENV"
+
+      - name: Sign artifacts and regenerate checksums
+        run: ./scripts/sign-artifacts.sh
+
+      - name: Publish signing key to object storage
+        run: |
+          set -euo pipefail
+          aws --endpoint-url "${AWS_ENDPOINT_URL}" s3 cp \
+            keys/atlas-cloud-artifact-signing.asc \
+            "s3://${BUCKET_NAME}/keys/atlas-cloud-artifact-signing.asc" \
+            --content-type "application/pgp-keys" \
+            --cache-control "max-age=3600" \
+            --only-show-errors
+
+  pages:
+    needs: sign
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.ATLAS_S3_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.ATLAS_S3_SECRET_ACCESS_KEY }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/configure-pages@v6
+
+      - name: Install Bun
+        run: |
+          set -euo pipefail
+          curl -fsSL https://bun.sh/install | bash
+          echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
+
+      - name: Build Pages site
+        run: |
+          set -euo pipefail
+          cd index
+          bun install --frozen-lockfile
+          bun run build
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: index/dist
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5

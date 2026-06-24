@@ -2,7 +2,7 @@
 # Serially build and upload CKS ISOs for a list of Kubernetes versions.
 # Idempotent: skips versions whose object already exists in the bucket.
 #
-# Usage (on the build VM, creds already sourced):
+# Usage (with S3 credentials already sourced):
 #   ./bulk-build.sh 1.33.1 1.33.2 1.34.1 ...
 #
 # Required env: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_ENDPOINT_URL,
@@ -23,7 +23,8 @@ export HEADLAMP_VERSION="${HEADLAMP_VERSION:-0.25.0}"
 export CNI_YAML_URL="${CNI_YAML_URL:-https://raw.githubusercontent.com/projectcalico/calico/v3.29.0/manifests/calico.yaml}"
 export S3_BUCKET="${S3_BUCKET:-$BUCKET_NAME}"
 export S3_ENDPOINT_URL="${S3_ENDPOINT_URL:-$AWS_ENDPOINT_URL}"
-: "${OUTPUT_DIR:=/opt/cks-builder/output}"
+REPO_ROOT=$(cd "$(dirname "$0")/.." && pwd)
+: "${OUTPUT_DIR:=${REPO_ROOT}/output}"
 export OUTPUT_DIR
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
@@ -42,20 +43,6 @@ aws_head() {
   fi
   echo "!! head-object failed for $1 (rc=$rc): $out" >&2
   exit 2
-}
-
-publish_index() {
-  local tsdir="$SCRIPT_DIR/../index"
-  local log="${PUBLISH_INDEX_LOG:-/opt/cks-builder/logs/publish-index.log}"
-  [[ -f "$tsdir/build.ts" ]] || return 0
-  mkdir -p "$(dirname "$log")"
-  # Serialise against a concurrent sign-artifacts.sh run so that the two
-  # don't race on cks/index.html + CHECKSUM-*.
-  if (cd "$tsdir" && flock -w 300 /var/lock/cks-publish.lock bash -c 'bun run build && bun run publish') >>"$log" 2>&1; then
-    echo "[index] refreshed"
-  else
-    echo "[index] refresh failed (see $log)"
-  fi
 }
 
 # Reclaim ISO build artifacts between versions: containerd images, /tmp scratch,
@@ -100,8 +87,6 @@ for V in "$@"; do
   echo "[done] $V"
   reclaim
   disk_status
-  publish_index
 done
 
 echo "[bulk] all requested versions processed"
-publish_index

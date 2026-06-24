@@ -1,6 +1,0 @@
-collections:
-  - name: ngine_io.cloudstack
-    version: ">=3.0.0"
-  - name: community.docker
-    version: ">=3.10.0"
-  - name: community.general
