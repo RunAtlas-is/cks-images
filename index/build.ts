@@ -421,20 +421,22 @@ async function main() {
 
   const html = renderHtml({ entries, support, shaByIso, ascNames, minorsWithChecksum });
 
-  mkdirSync(DIST, { recursive: true });
-  writeFileSync(join(DIST, "index.html"), html);
-  // Copy static assets verbatim into the Pages artifact.
-  for (const asset of ["favicon.svg", "logo.svg"]) {
-    writeFileSync(join(DIST, asset), readFileSync(join(BRANDING, asset)));
+  for (const target of [DIST, join(DIST, "cks")]) {
+    mkdirSync(target, { recursive: true });
+    writeFileSync(join(target, "index.html"), html);
+    // Copy static assets verbatim into the Pages artifact.
+    for (const asset of ["favicon.svg", "logo.svg"]) {
+      writeFileSync(join(target, asset), readFileSync(join(BRANDING, asset)));
+    }
+    mkdirSync(join(target, "keys"), { recursive: true });
+    writeFileSync(
+      join(target, KEY_PATH),
+      readFileSync(KEY_SOURCE),
+    );
   }
-  mkdirSync(join(DIST, "keys"), { recursive: true });
-  writeFileSync(
-    join(DIST, KEY_PATH),
-    readFileSync(KEY_SOURCE),
-  );
 
   const isoCount = entries.filter((e) => parseIso(e.key.replace(/^cks\//, ""))).length;
-  console.log(`[build] wrote ${DIST}/index.html (${html.length} bytes, ${isoCount} ISOs) + Pages assets`);
+  console.log(`[build] wrote ${DIST}/index.html and /cks/index.html (${html.length} bytes, ${isoCount} ISOs) + Pages assets`);
 }
 
 await main();
