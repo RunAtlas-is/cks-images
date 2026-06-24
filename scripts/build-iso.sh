@@ -74,7 +74,7 @@ echo ">> Built $iso_path ($(du -h "$iso_path" | cut -f1))"
 sha256sum "$iso_path" > "${iso_path}.sha256"
 
 # GPG-sign the ISO if a signing keyring is available. Requires either a
-# pre-imported key in GNUPGHOME or the default gnupg dir with the Atlas key.
+# pre-imported key in GNUPGHOME or the default gnupg directory.
 if [[ -n "${SIGNING_KEY:-}" ]] && gpg --batch --list-secret-keys "$SIGNING_KEY" >/dev/null 2>&1; then
   gpg_args=(--batch --yes --local-user "$SIGNING_KEY")
   if [[ -n "${GPG_PASSPHRASE:-}" ]]; then
@@ -84,7 +84,7 @@ if [[ -n "${SIGNING_KEY:-}" ]] && gpg --batch --list-secret-keys "$SIGNING_KEY" 
     --armor --detach-sign \
     --output "${iso_path}.asc" \
     "$iso_path"
-  echo ">> Signed $iso_path → ${iso_path}.asc"
+  echo ">> Signed $iso_path -> ${iso_path}.asc"
 fi
 
 if [[ -n "${S3_BUCKET:-}" ]]; then

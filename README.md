@@ -8,6 +8,7 @@ runs the daily build matrix, stores ISO artifacts in S3-compatible storage, and
 publishes the static catalog through GitHub Pages.
 
 - Catalog: <https://runatlas-is.github.io/cks-images/>
+- Manifest: <https://runatlas-is.github.io/cks-images/manifest.json>
 - Artifacts: <https://s3.runatlas.is/atlas-static-assets/cks/>
 - Public signing key: <https://runatlas-is.github.io/cks-images/keys/atlas-cloud-artifact-signing.asc>
 
@@ -22,8 +23,9 @@ publishes the static catalog through GitHub Pages.
 └── scripts/
     ├── build-iso.sh                   build and optionally upload one ISO
     ├── bulk-build.sh                  local helper for multiple versions
-    ├── register-cloudstack-version.py idempotent CloudStack registration
-    └── sign-artifacts.sh              sign bucket ISOs and checksums
+    ├── register-cloudstack-version.py register one CloudStack supported version
+    ├── sign-artifacts.sh              sign bucket ISOs and checksums
+    └── sync-cloudstack-supported-versions.py pull manifest into CloudStack
 ```
 
 ## CI Ownership
@@ -35,7 +37,8 @@ The scheduled workflow runs daily at 06:00 UTC. It:
 3. Uploads ISOs, SHA-256 files, and detached signatures to S3-compatible
    object storage.
 4. Regenerates signed `CHECKSUM-<minor>` files.
-5. Builds the static catalog and deploys it to GitHub Pages.
+5. Builds the static catalog plus `manifest.json` and deploys both to GitHub
+   Pages.
 
 ## Required Secrets
 
@@ -56,6 +59,17 @@ Repository variables:
 - `DOCS_URL`
 - `GPG_SIGNING_KEY`, default `artifacts@runatlas.is`
 - `GPG_SIGNING_FINGERPRINT`
+
+Optional `cloudstack-registration` environment secrets for the manual
+`register_cloudstack` workflow input:
+
+- `CLOUDSTACK_API_KEY`
+- `CLOUDSTACK_SECRET_KEY`
+
+Optional `cloudstack-registration` environment variables:
+
+- `CLOUDSTACK_ENDPOINT`
+- `CLOUDSTACK_ZONE_ID` or `CLOUDSTACK_ZONE_IDS`
 
 ## Local Use
 

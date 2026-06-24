@@ -1,16 +1,21 @@
 #!/usr/bin/env bun
 // Build the static explorer page (plus its branding assets) into ./dist.
 // Reads the bucket contents to enumerate ISOs, fetches Kubernetes support
-// dates from endoflife.date, emits dist/index.html. Does not write to S3.
+// dates from endoflife.date, emits dist/index.html and dist/manifest.json.
+// Does not write to S3.
 //
 // Env:
 //   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_ENDPOINT_URL, BUCKET_NAME
 //     required (read-only)
 //   DOCS_URL                  link shown in the header + footer
+//   S3_PREFIX                 object prefix for CKS artifacts (default: cks/)
 //   ARTIFACT_BASE_URL         public base URL for objects in BUCKET_NAME
 //   SITE_BASE_URL             public base URL for this GitHub Pages site
 //   KEY_URL                   public URL for the artifact signing key
 //   SIGNING_FINGERPRINT       Atlas artifact key fingerprint (display only)
+//   CKS_MIN_CPU               CloudStack mincpunumber in manifest (default: 2)
+//   CKS_MIN_MEMORY            CloudStack minmemory in manifest (default: 2048)
+//   CKS_DIRECT_DOWNLOAD       CloudStack directdownload in manifest (default: false)
 
 import {
   S3Client,
@@ -31,6 +36,7 @@ const AWS_ACCESS_KEY_ID = need("AWS_ACCESS_KEY_ID");
 const AWS_SECRET_ACCESS_KEY = need("AWS_SECRET_ACCESS_KEY");
 const AWS_ENDPOINT_URL = need("AWS_ENDPOINT_URL");
 const BUCKET = need("BUCKET_NAME");
+const S3_PREFIX = normalizePrefix(process.env.S3_PREFIX ?? "cks/");
 const DOCS_URL =
   process.env.DOCS_URL ??
   "https://github.com/RunAtlas-is/cks-images/blob/main/docs/cloudstack-integration.md";
@@ -41,6 +47,9 @@ const SITE_BASE_URL =
 const KEY_PATH = "keys/atlas-cloud-artifact-signing.asc";
 const SIGNING_FINGERPRINT =
   process.env.SIGNING_FINGERPRINT ?? "4C2D72FDDEF77A5CC4A7D2C421CA4588DCB6991E";
+const CKS_MIN_CPU = Number(process.env.CKS_MIN_CPU ?? "2");
+const CKS_MIN_MEMORY = Number(process.env.CKS_MIN_MEMORY ?? "2048");
+const CKS_DIRECT_DOWNLOAD = /^true$/i.test(process.env.CKS_DIRECT_DOWNLOAD ?? "false");
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DIST = process.env.DIST_DIR ?? join(HERE, "dist");
@@ -60,6 +69,30 @@ const s3 = new S3Client({
 type Entry = { key: string; size: number; modified: Date };
 type SupportEntry = { maintenance?: string; eol?: string };
 type SupportMap = Record<string, SupportEntry>;
+type ParsedIso = {
+  major: number;
+  minor: number;
+  patch: number;
+  version: string;
+  minorKey: string;
+  sourceArch: string;
+  cloudstackArch: string;
+  sortKey: number;
+};
+
+function normalizePrefix(prefix: string): string {
+  const trimmed = prefix.trim().replace(/^\/+/, "");
+  if (!trimmed) return "";
+  return trimmed.endsWith("/") ? trimmed : `${trimmed}/`;
+}
+
+function stripPrefix(key: string): string {
+  return key.startsWith(S3_PREFIX) ? key.slice(S3_PREFIX.length) : key;
+}
+
+function objectKey(name: string): string {
+  return `${S3_PREFIX}${name}`;
+}
 
 async function listCks(): Promise<Entry[]> {
   const entries: Entry[] = [];
@@ -70,12 +103,12 @@ async function listCks(): Promise<Entry[]> {
       page = await s3.send(
         new ListObjectsV2Command({
           Bucket: BUCKET,
-          Prefix: "cks/",
+          Prefix: S3_PREFIX,
           ContinuationToken: token,
         }),
       );
     } catch (err) {
-      throw new Error(`[build] list-objects-v2 failed on cks/${token ? ` (token=${token})` : ""}: ${err}`);
+      throw new Error(`[build] list-objects-v2 failed on ${S3_PREFIX}${token ? ` (token=${token})` : ""}: ${err}`);
     }
     for (const o of page.Contents ?? []) {
       if (!o.Key || o.Size == null || !o.LastModified) continue;
@@ -162,18 +195,96 @@ function formatTimestamp(d: Date): string {
   return `${iso.slice(0, 10)} ${iso.slice(11, 16)}`;
 }
 
-const isoNameRe = /^setup-v(\d+)\.(\d+)\.(\d+)-[^-]+-(amd64|arm64)(?:-[^.]+)?\.iso$/;
-function parseIso(name: string):
-  | { major: number; minor: number; patch: number; minorKey: string; arch: string; sortKey: number }
-  | null {
+const isoNameRe = /^setup-v(\d+)\.(\d+)\.(\d+)-[^-]+-(amd64|arm64)(?:-(x86_64|aarch64))?\.iso$/;
+function cloudstackArch(sourceArch: string, explicitArch?: string): string {
+  if (explicitArch) return explicitArch;
+  return sourceArch === "arm64" ? "aarch64" : "x86_64";
+}
+
+function parseIso(name: string): ParsedIso | null {
   const m = isoNameRe.exec(name);
   if (!m || !m[1] || !m[2] || !m[3] || !m[4]) return null;
   const major = Number(m[1]), minor = Number(m[2]), patch = Number(m[3]);
+  const sourceArch = m[4];
   return {
     major, minor, patch,
+    version: `${major}.${minor}.${patch}`,
     minorKey: `${major}.${minor}`,
-    arch: m[4],
+    sourceArch,
+    cloudstackArch: cloudstackArch(sourceArch, m[5]),
     sortKey: major * 1_000_000 + minor * 1_000 + patch,
+  };
+}
+
+function buildManifest(args: {
+  entries: Entry[];
+  support: SupportMap;
+  shaByIso: Map<string, string>;
+  ascNames: Set<string>;
+  minorsWithChecksum: string[];
+}): unknown {
+  const { entries, support, shaByIso, ascNames, minorsWithChecksum } = args;
+  const checksumSetByMinor = new Map(
+    minorsWithChecksum.map((minor) => [
+      minor,
+      {
+        url: artifactHref(objectKey(`CHECKSUM-${minor}`)),
+        signatureUrl: artifactHref(objectKey(`CHECKSUM-${minor}.asc`)),
+      },
+    ]),
+  );
+
+  const images = entries
+    .map((entry) => ({ entry, name: stripPrefix(entry.key), iso: parseIso(stripPrefix(entry.key)) }))
+    .filter((item): item is { entry: Entry; name: string; iso: ParsedIso } => item.iso != null)
+    .map(({ entry, name, iso }) => {
+      const checksum = checksumSetByMinor.get(iso.minorKey);
+      return {
+        version: iso.version,
+        minor: iso.minorKey,
+        patch: iso.patch,
+        filename: name,
+        key: entry.key,
+        url: artifactHref(entry.key),
+        sha256: shaByIso.get(name) ?? null,
+        sha256Url: artifactHref(`${entry.key}.sha256`),
+        signatureUrl: ascNames.has(`${name}.asc`) ? artifactHref(`${entry.key}.asc`) : null,
+        checksumSetUrl: checksum?.url ?? null,
+        checksumSetSignatureUrl: checksum?.signatureUrl ?? null,
+        sizeBytes: entry.size,
+        lastModified: entry.modified.toISOString(),
+        lifecycle: support[iso.minorKey] ?? {},
+        cloudstack: {
+          name: `v${iso.version}`,
+          semanticVersion: iso.version,
+          arch: iso.cloudstackArch,
+          minCpuNumber: CKS_MIN_CPU,
+          minMemory: CKS_MIN_MEMORY,
+          directDownload: CKS_DIRECT_DOWNLOAD,
+        },
+      };
+    })
+    .sort((a, b) => b.version.localeCompare(a.version, undefined, { numeric: true }));
+
+  return {
+    schemaVersion: 1,
+    generatedAt: new Date().toISOString(),
+    artifactBaseUrl: ARTIFACT_BASE_URL.replace(/\/+$/, ""),
+    siteBaseUrl: SITE_BASE_URL.replace(/\/+$/, ""),
+    storage: {
+      bucket: BUCKET,
+      prefix: S3_PREFIX,
+    },
+    signingKey: {
+      url: KEY_URL,
+      fingerprint: SIGNING_FINGERPRINT.toUpperCase(),
+    },
+    checksumSets: minorsWithChecksum.map((minor) => ({
+      minor,
+      url: artifactHref(objectKey(`CHECKSUM-${minor}`)),
+      signatureUrl: artifactHref(objectKey(`CHECKSUM-${minor}.asc`)),
+    })),
+    images,
   };
 }
 
@@ -212,7 +323,7 @@ function renderHtml(args: {
   const isChecksum = (n: string) => n.startsWith("CHECKSUM-") && !n.endsWith(".asc");
 
   const display = entries
-    .map((e) => ({ ...e, name: e.key.replace(/^cks\//, "") }))
+    .map((e) => ({ ...e, name: stripPrefix(e.key) }))
     .filter((e) => !hidden.has(e.name))
     .filter((e) => !e.name.endsWith(".sha256") && !e.name.endsWith(".asc") && !isChecksum(e.name))
     .sort((a, b) => a.name.localeCompare(b.name));
@@ -233,18 +344,18 @@ function renderHtml(args: {
       const subLinks: string[] = [];
       if (sha) {
         subLinks.push(
-          `<a class="sub" href="${escape(artifactHref(`cks/${e.name}.sha256`))}" title="${escape(sha)}">sha</a>`,
+          `<a class="sub" href="${escape(artifactHref(`${objectKey(e.name)}.sha256`))}" title="${escape(sha)}">sha</a>`,
         );
       }
       if (hasAsc) {
-        subLinks.push(`<a class="sub" href="${escape(artifactHref(`cks/${e.name}.asc`))}">.asc</a>`);
+        subLinks.push(`<a class="sub" href="${escape(artifactHref(`${objectKey(e.name)}.asc`))}">.asc</a>`);
       }
       const subBlock = subLinks.length ? ` <span class="sub">(${subLinks.join(", ")})</span>` : "";
       rows.push(
         `<tr>` +
           `<td>&#x1F4BE;</td>` +
-          `<td data-sort="${iso.sortKey}"><a href="${escape(artifactHref(`cks/${e.name}`))}">${escape(e.name)}</a>${subBlock}</td>` +
-          `<td data-sort="${escape(iso.arch)}">${escape(iso.arch)}</td>` +
+          `<td data-sort="${iso.sortKey}"><a href="${escape(artifactHref(objectKey(e.name)))}">${escape(e.name)}</a>${subBlock}</td>` +
+          `<td data-sort="${escape(iso.cloudstackArch)}">${escape(iso.cloudstackArch)}</td>` +
           `<td data-sort="${modSort}" align="right">${escape(modH)}</td>` +
           `<td data-sort="${e.size}" align="right"><tt>${sizeH}</tt></td>` +
           `<td data-sort="${maint.sortKey}">${maint.display}</td>` +
@@ -255,7 +366,7 @@ function renderHtml(args: {
       rows.push(
         `<tr>` +
           `<td>&#x1F4C4;</td>` +
-          `<td data-sort="${escape(e.name)}"><a href="${escape(artifactHref(`cks/${e.name}`))}">${escape(e.name)}</a></td>` +
+          `<td data-sort="${escape(e.name)}"><a href="${escape(artifactHref(objectKey(e.name)))}">${escape(e.name)}</a></td>` +
           `<td data-sort="">&mdash;</td>` +
           `<td data-sort="${modSort}" align="right">${escape(modH)}</td>` +
           `<td data-sort="${e.size}" align="right"><tt>${sizeH}</tt></td>` +
@@ -310,13 +421,13 @@ function renderHtml(args: {
       ? minorsWithChecksum
           .map(
             (m) =>
-              `<a href="${escape(artifactHref(`cks/CHECKSUM-${m}`))}">CHECKSUM-${escape(m)}</a> <span class="sub">(<a href="${escape(artifactHref(`cks/CHECKSUM-${m}.asc`))}">.asc</a>)</span>`,
+              `<a href="${escape(artifactHref(objectKey(`CHECKSUM-${m}`)))}">CHECKSUM-${escape(m)}</a> <span class="sub">(<a href="${escape(artifactHref(objectKey(`CHECKSUM-${m}.asc`)))}">.asc</a>)</span>`,
           )
           .join(" &middot; ")
       : "<em>no checksum files yet</em>"}
 <pre>curl -sO ${escape(KEY_URL)} && gpg --import atlas-cloud-artifact-signing.asc
-curl -sO ${escape(artifactHref("cks/CHECKSUM-1.33"))}
-curl -sO ${escape(artifactHref("cks/CHECKSUM-1.33.asc"))}
+curl -sO ${escape(artifactHref(objectKey("CHECKSUM-1.33")))}
+curl -sO ${escape(artifactHref(objectKey("CHECKSUM-1.33.asc")))}
 gpg --verify CHECKSUM-1.33.asc CHECKSUM-1.33
 sha256sum --check --ignore-missing CHECKSUM-1.33</pre>
   </div>
@@ -394,7 +505,7 @@ ${rows.join("\n")}
 
 async function main() {
   const [entries, support] = await Promise.all([listCks(), fetchSupportMap()]);
-  const bareNames = entries.map((e) => e.key.replace(/^cks\//, ""));
+  const bareNames = entries.map((e) => stripPrefix(e.key));
   const ascNames = new Set(bareNames.filter((n) => n.endsWith(".asc")));
 
   const shaByIso = new Map<string, string>();
@@ -403,7 +514,7 @@ async function main() {
       .filter((e) => e.key.endsWith(".iso.sha256"))
       .map(async (e) => {
         const digest = await fetchSha(e.key);
-        return { name: e.key.replace(/^cks\//, "").replace(/\.sha256$/, ""), digest };
+        return { name: stripPrefix(e.key).replace(/\.sha256$/, ""), digest };
       }),
   );
   for (const r of shaResults) {
@@ -420,10 +531,16 @@ async function main() {
     .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
 
   const html = renderHtml({ entries, support, shaByIso, ascNames, minorsWithChecksum });
+  const manifest = JSON.stringify(
+    buildManifest({ entries, support, shaByIso, ascNames, minorsWithChecksum }),
+    null,
+    2,
+  ) + "\n";
 
   for (const target of [DIST, join(DIST, "cks")]) {
     mkdirSync(target, { recursive: true });
     writeFileSync(join(target, "index.html"), html);
+    writeFileSync(join(target, "manifest.json"), manifest);
     // Copy static assets verbatim into the Pages artifact.
     for (const asset of ["favicon.svg", "logo.svg"]) {
       writeFileSync(join(target, asset), readFileSync(join(BRANDING, asset)));
@@ -435,8 +552,8 @@ async function main() {
     );
   }
 
-  const isoCount = entries.filter((e) => parseIso(e.key.replace(/^cks\//, ""))).length;
-  console.log(`[build] wrote ${DIST}/index.html and /cks/index.html (${html.length} bytes, ${isoCount} ISOs) + Pages assets`);
+  const isoCount = entries.filter((e) => parseIso(stripPrefix(e.key))).length;
+  console.log(`[build] wrote ${DIST}/index.html, /cks/index.html, and manifest.json (${html.length} bytes, ${isoCount} ISOs) + Pages assets`);
 }
 
 await main();

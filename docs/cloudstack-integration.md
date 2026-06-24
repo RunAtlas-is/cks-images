@@ -1,7 +1,8 @@
 # CloudStack Integration
 
-This repository builds and publishes CKS binaries ISOs. CloudStack must still
-know which ISO URLs are supported for tenant Kubernetes clusters.
+This repository builds and publishes CKS binaries ISOs. CloudStack consumes the
+published manifest and registers selected ISO URLs as supported Kubernetes
+versions for tenant clusters.
 
 Apache CloudStack documents this as the CKS supported-version registry:
 `addKubernetesSupportedVersion` registers an ISO URL, semantic version, checksum,
@@ -32,38 +33,110 @@ passing the target supported-version ID to `upgradeKubernetesCluster`:
 
 <https://cloudstack.apache.org/api/apidocs-4.22/apis/upgradeKubernetesCluster.html>
 
-## Manual Registration
+## Registration Model
 
-The scheduled GitHub workflow publishes ISOs and the static catalog only. Use
-this helper manually, or wrap it in your own automation, after an ISO exists in
-object storage. Set these environment variables:
+The preferred registration model is pull-based:
+
+1. GitHub Actions builds, signs, and publishes ISOs plus the Pages catalog.
+2. The Pages catalog includes `manifest.json`.
+3. A job inside the CloudStack operator environment fetches the manifest,
+   verifies the signed checksum sets, and calls the CloudStack API.
+
+This keeps CloudStack API credentials inside the operator network and makes the
+GitHub workflow an artifact publisher, not a CloudStack mutator.
+
+Manifest URLs:
+
+- <https://runatlas-is.github.io/cks-images/manifest.json>
+- <https://runatlas-is.github.io/cks-images/cks/manifest.json>
+
+Run the puller from a host that can reach the CloudStack API. Set these
+environment variables:
 
 - `CLOUDSTACK_ENDPOINT`
 - `CLOUDSTACK_API_KEY`
 - `CLOUDSTACK_SECRET_KEY`
-- `CLOUDSTACK_ZONE_ID`
+- `CLOUDSTACK_ZONE_ID` or comma-separated `CLOUDSTACK_ZONE_IDS`
 
 Optional environment variables:
 
 - `CKS_MIN_CPU`, default `2`
 - `CKS_MIN_MEMORY`, default `2048`
+- `CKS_ARCH`, default `x86_64`
+- `CKS_DIRECT_DOWNLOAD`, default `false`
+- `CKS_MANIFEST_URL`, default `https://runatlas-is.github.io/cks-images/manifest.json`
+- `GPG_SIGNING_FINGERPRINT`
 
 Example:
 
 ```bash
-python3 scripts/register-cloudstack-version.py \
-  --version 1.33.11 \
-  --url "https://s3.runatlas.is/atlas-static-assets/cks/<iso>" \
-  --checksum <sha256> \
+mkdir -p .cache
+python3 -m venv .cache/cloudstack-venv
+.cache/cloudstack-venv/bin/python -m pip install cs
+
+.cache/cloudstack-venv/bin/python \
+  scripts/sync-cloudstack-supported-versions.py \
+  --manifest-url https://runatlas-is.github.io/cks-images/manifest.json \
   --zone-id "${CLOUDSTACK_ZONE_ID}" \
-  --enable-existing
+  --dry-run
 ```
 
-The CloudStack API role behind this account must allow:
+Remove `--dry-run` after the selected versions and zones look correct. Useful
+filters:
+
+```bash
+.cache/cloudstack-venv/bin/python \
+  scripts/sync-cloudstack-supported-versions.py --minor 1.34
+.cache/cloudstack-venv/bin/python \
+  scripts/sync-cloudstack-supported-versions.py --version 1.34.7
+.cache/cloudstack-venv/bin/python \
+  scripts/sync-cloudstack-supported-versions.py --latest-per-minor
+```
+
+The lower-level one-version helper supports manual repair:
+
+```bash
+python3 scripts/register-cloudstack-version.py \
+  --version 1.34.7 \
+  --url "https://s3.runatlas.is/atlas-static-assets/cks/<iso>" \
+  --checksum "<sha256>" \
+  --zone-id "${CLOUDSTACK_ZONE_ID}"
+```
+
+The `CKS images` workflow also has a manual `register_cloudstack` input. It runs
+the same puller after Pages deploy through the `cloudstack-registration`
+environment. Use that path only with an environment-protected CloudStack service
+account.
+
+## Minimum CloudStack Role
+
+The CloudStack API role behind the sync account is an admin/root-admin role type
+with only these API rules allowed:
 
 - `listKubernetesSupportedVersions`
 - `addKubernetesSupportedVersion`
 - `updateKubernetesSupportedVersion`
+
+API references:
+
+- <https://cloudstack.apache.org/api/apidocs-4.22/apis/listKubernetesSupportedVersions.html>
+- <https://cloudstack.apache.org/api/apidocs-4.22/apis/addKubernetesSupportedVersion.html>
+- <https://cloudstack.apache.org/api/apidocs-4.22/apis/updateKubernetesSupportedVersion.html>
+
+Avoid these permissions in the daily sync account:
+
+- `deleteKubernetesSupportedVersion`
+- `listZones`, because zone IDs are supplied by local configuration
+- Cluster lifecycle APIs such as `upgradeKubernetesCluster`,
+  `createKubernetesCluster`, and `deleteKubernetesCluster`
+
+CloudStack roles allow or deny named APIs and wildcard API patterns:
+
+<https://docs.cloudstack.apache.org/en/4.22.0.0/adminguide/accounts.html>
+
+Delete reference for cleanup-only roles:
+
+<https://cloudstack.apache.org/api/apidocs-4.22/apis/deleteKubernetesSupportedVersion.html>
 
 ## Tenant API Endpoint
 
@@ -117,5 +190,5 @@ kubectl -n kube-system logs -l component=cloud-controller-manager
 ```
 
 The secret should contain the tenant-routable API URL, and creating a
-`Service` of type `LoadBalancer` should no longer time out while listing or
-creating CloudStack load balancer rules.
+`Service` of type `LoadBalancer` should list and create CloudStack load
+balancer rules without timing out.

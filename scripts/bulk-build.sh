@@ -6,7 +6,7 @@
 #   ./bulk-build.sh 1.33.1 1.33.2 1.34.1 ...
 #
 # Required env: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_ENDPOINT_URL,
-# BUCKET_NAME (the export-atlas-s3-env.sh helper provides these).
+# BUCKET_NAME.
 # Optional env: CNI_VERSION, CRICTL_VERSION, HEADLAMP_VERSION, CNI_YAML_URL
 # override the pinned defaults.
 
@@ -23,6 +23,7 @@ export HEADLAMP_VERSION="${HEADLAMP_VERSION:-0.25.0}"
 export CNI_YAML_URL="${CNI_YAML_URL:-https://raw.githubusercontent.com/projectcalico/calico/v3.29.0/manifests/calico.yaml}"
 export S3_BUCKET="${S3_BUCKET:-$BUCKET_NAME}"
 export S3_ENDPOINT_URL="${S3_ENDPOINT_URL:-$AWS_ENDPOINT_URL}"
+export S3_PREFIX="${S3_PREFIX:-cks/}"
 REPO_ROOT=$(cd "$(dirname "$0")/.." && pwd)
 : "${OUTPUT_DIR:=${REPO_ROOT}/output}"
 export OUTPUT_DIR
@@ -76,7 +77,11 @@ disk_status() {
 
 disk_status
 for V in "$@"; do
-  KEY="cks/setup-v${V}-calico-amd64-x86_64.iso"
+  prefix="${S3_PREFIX#/}"
+  if [[ -n "$prefix" && "$prefix" != */ ]]; then
+    prefix="${prefix}/"
+  fi
+  KEY="${prefix}setup-v${V}-calico-amd64-x86_64.iso"
   if aws_head "$KEY"; then
     echo "[skip] $KEY already present"
     continue

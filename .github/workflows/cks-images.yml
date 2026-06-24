@@ -14,6 +14,11 @@ on:
         required: false
         type: boolean
         default: false
+      register_cloudstack:
+        description: Register published images in CloudStack after Pages deploy. Requires the cloudstack-registration environment.
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -145,8 +150,12 @@ jobs:
             echo "No stable release found for ${{ matrix.minor }}" >&2
             exit 1
           fi
+          prefix="${S3_PREFIX#/}"
+          if [[ -n "$prefix" && "$prefix" != */ ]]; then
+            prefix="${prefix}/"
+          fi
           echo "k8s_version=$latest" >> "$GITHUB_OUTPUT"
-          echo "object_key=cks/setup-v${latest}-calico-amd64-x86_64.iso" >> "$GITHUB_OUTPUT"
+          echo "object_key=${prefix}setup-v${latest}-calico-amd64-x86_64.iso" >> "$GITHUB_OUTPUT"
 
       - name: Check existing object
         id: existing
@@ -276,3 +285,44 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v5
+
+  cloudstack:
+    needs: pages
+    if: github.event_name == 'workflow_dispatch' && inputs.register_cloudstack
+    runs-on: ubuntu-24.04
+    environment: cloudstack-registration
+    permissions:
+      contents: read
+    env:
+      CLOUDSTACK_ENDPOINT: ${{ vars.CLOUDSTACK_ENDPOINT }}
+      CLOUDSTACK_API_KEY: ${{ secrets.CLOUDSTACK_API_KEY }}
+      CLOUDSTACK_SECRET_KEY: ${{ secrets.CLOUDSTACK_SECRET_KEY }}
+      CLOUDSTACK_ZONE_IDS: ${{ vars.CLOUDSTACK_ZONE_IDS || vars.CLOUDSTACK_ZONE_ID }}
+      CKS_MANIFEST_URL: ${{ vars.CKS_MANIFEST_URL }}
+      CKS_ARCH: ${{ vars.CKS_ARCH || 'x86_64' }}
+      CKS_MIN_CPU: ${{ vars.CKS_MIN_CPU || '2' }}
+      CKS_MIN_MEMORY: ${{ vars.CKS_MIN_MEMORY || '2048' }}
+      CKS_DIRECT_DOWNLOAD: ${{ vars.CKS_DIRECT_DOWNLOAD || 'false' }}
+      GPG_SIGNING_FINGERPRINT: ${{ vars.GPG_SIGNING_FINGERPRINT }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install prerequisites
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ca-certificates gnupg python3-pip python3-venv
+          mkdir -p .cache
+          python3 -m venv .cache/cloudstack-venv
+          .cache/cloudstack-venv/bin/python -m pip install cs
+
+      - name: Sync CloudStack supported versions
+        run: |
+          set -euo pipefail
+          test -n "${CLOUDSTACK_ENDPOINT}" || { echo "CLOUDSTACK_ENDPOINT is missing" >&2; exit 1; }
+          test -n "${CLOUDSTACK_API_KEY}" || { echo "CLOUDSTACK_API_KEY is missing" >&2; exit 1; }
+          test -n "${CLOUDSTACK_SECRET_KEY}" || { echo "CLOUDSTACK_SECRET_KEY is missing" >&2; exit 1; }
+          test -n "${CLOUDSTACK_ZONE_IDS}" || { echo "CLOUDSTACK_ZONE_IDS or CLOUDSTACK_ZONE_ID is missing" >&2; exit 1; }
+          manifest_url="${CKS_MANIFEST_URL:-${SITE_BASE_URL%/}/manifest.json}"
+          .cache/cloudstack-venv/bin/python scripts/sync-cloudstack-supported-versions.py \
+            --manifest-url "${manifest_url}"
