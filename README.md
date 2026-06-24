@@ -22,6 +22,7 @@ publishes the static catalog through GitHub Pages.
 └── scripts/
     ├── build-iso.sh                   build and optionally upload one ISO
     ├── bulk-build.sh                  local helper for multiple versions
+    ├── export-s3-env.py               derive S3 credentials from CloudStack
     ├── register-cloudstack-version.py idempotent CloudStack registration
     └── sign-artifacts.sh              sign bucket ISOs and checksums
 ```
@@ -42,15 +43,15 @@ The scheduled workflow runs daily at 06:00 UTC. It:
 
 Repository secrets:
 
-- `ATLAS_S3_ACCESS_KEY_ID`
-- `ATLAS_S3_SECRET_ACCESS_KEY`
+- `CS_API_KEY`
+- `CS_SECRET_KEY`
 - `ATLAS_CKS_GPG_PRIVATE_KEY`
 - `ATLAS_CKS_GPG_PASSPHRASE` when the key is passphrase protected
 
-Optional repository secrets for CloudStack registration:
-
-- `ATLAS_CLOUDSTACK_API_KEY`
-- `ATLAS_CLOUDSTACK_SECRET_KEY`
+The `CS_*` account is used both for CloudStack registration and to resolve the
+`atlas-static-assets` S3 credentials from CloudStack bucket metadata at runtime.
+The workflow also accepts the legacy `ATLAS_CLOUDSTACK_API_KEY` and
+`ATLAS_CLOUDSTACK_SECRET_KEY` secret names, but `CS_*` is the canonical name.
 
 Repository variables:
 

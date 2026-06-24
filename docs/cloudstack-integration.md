@@ -37,8 +37,8 @@ passing the target supported-version ID to `upgradeKubernetesCluster`:
 The GitHub workflow can register CKS versions automatically after an ISO exists
 in object storage. Configure these repository secrets:
 
-- `ATLAS_CLOUDSTACK_API_KEY`
-- `ATLAS_CLOUDSTACK_SECRET_KEY`
+- `CS_API_KEY`
+- `CS_SECRET_KEY`
 
 Configure this repository variable:
 
@@ -55,14 +55,16 @@ The workflow calls:
 ```bash
 python3 scripts/register-cloudstack-version.py \
   --version 1.33.11 \
-  --url https://s3.runatlas.is/atlas-static-assets/cks/setup-v1.33.11-calico-amd64-x86_64.iso \
+  --url "https://s3.runatlas.is/atlas-static-assets/cks/<iso>" \
   --checksum <sha256> \
   --zone-id <zone-id> \
   --enable-existing
 ```
 
-If CloudStack credentials or the zone ID are missing, CI builds and publishes
-the ISO but skips registration with a notice.
+The same `CS_*` credentials are used to resolve the `atlas-static-assets`
+bucket credentials from CloudStack before the workflow uploads, signs, or lists
+objects. If the zone ID is missing, CI builds and publishes the ISO but skips
+CloudStack supported-version registration with a notice.
 
 ## Tenant API Endpoint
 
@@ -81,17 +83,24 @@ http://172.30.0.100:8080/client/api
 cluster's auto-created isolated tenant network. LoadBalancer reconciliation
 therefore times out when the controller tries to call CloudStack.
 
-For Atlas Cloud, set `endpoint.url` to the tenant-routable CloudStack API
-address instead:
+For Atlas Cloud, set `endpoint.url` to the public DNS name and HTTPS API path:
 
 ```text
-http://149.126.81.1:8080/client/api
+https://sky.runatlas.is/client/api
 ```
 
-`sky.runatlas.is` currently resolves to `149.126.81.8`; the `.1` address on the
-same public subnet is the internally reachable CloudStack API path for tenant
-networks. If that path changes, the invariant stays the same: `endpoint.url`
-must be an address that CKS nodes and pods can reach, not a management-only VIP.
+The CloudStack API is served on HTTPS port 443. Tenant networks currently need
+an internal routing shim for this name: `sky.runatlas.is` resolves publicly to
+the `.8` address, while tenant CKS clusters should reach the equivalent `.1`
+address from inside the isolated network. Prefer preserving the DNS name for
+TLS validation and adding a node-level `/etc/hosts` or equivalent DNS override
+that maps `sky.runatlas.is` to the tenant-reachable `.1` address. A bare IP
+URL should only be a temporary fallback because it loses the hostname/certificate
+contract.
+
+If that path changes, the invariant stays the same: `endpoint.url` must be an
+HTTPS CloudStack API URL that CKS nodes and pods can reach, not a management-only
+VIP.
 
 After changing `endpoint.url`, newly created clusters should receive the correct
 secret automatically. Existing affected clusters need their generated

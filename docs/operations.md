@@ -26,6 +26,11 @@ GitHub stores the source, workflow, and static catalog. ISO artifacts live in
 Atlas object storage because GitHub is not a good fit for multi-GB tenant
 installation media.
 
+CI does not store standalone S3 credentials in GitHub. It uses the `CS_API_KEY`
+and `CS_SECRET_KEY` repository secrets to look up the `atlas-static-assets`
+bucket in CloudStack, exports the bucket's S3 credentials for the current job,
+then uploads or lists objects through `https://s3.runatlas.is`.
+
 Current public object paths:
 
 - `https://s3.runatlas.is/atlas-static-assets/cks/setup-v<version>-calico-amd64-x86_64.iso`
@@ -36,6 +41,20 @@ Current public object paths:
 
 The GitHub Pages catalog is generated from the bucket listing. It does not
 publish index files back into object storage.
+
+## Tenant Availability
+
+Freshly built images become available to tenants in two steps:
+
+1. The workflow uploads the immutable ISO, SHA-256 file, and detached signature
+   to `atlas-static-assets/cks/`.
+2. The workflow registers that exact URL and checksum in CloudStack with
+   `addKubernetesSupportedVersion` for `ATLAS_CLOUDSTACK_ZONE_ID`.
+
+After registration, CloudStack can offer that Kubernetes patch version when a
+tenant creates a new CKS cluster. Existing clusters are not patched
+transparently; upgrade them intentionally through CloudStack's
+`upgradeKubernetesCluster` flow after validation.
 
 ## Signing
 
@@ -74,6 +93,9 @@ export AWS_SECRET_ACCESS_KEY=...
 export S3_BUCKET=atlas-static-assets
 export S3_ENDPOINT_URL=https://s3.runatlas.is
 ```
+
+In CI these values are derived from CloudStack by
+`scripts/export-s3-env.py` before each job step that uses S3.
 
 To refresh signatures/checksums for existing bucket objects:
 
