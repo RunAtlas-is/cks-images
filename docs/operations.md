@@ -67,7 +67,7 @@ Kubernetes minor.
 
 Required GitHub secrets:
 
-- `GPG_PRIVATE_KEY`
+- `GPG_PRIVATE_KEY_B64`
 - `GPG_PASSPHRASE` if the key is passphrase protected
 
 The public key is committed at `keys/atlas-cloud-artifact-signing.asc` and is

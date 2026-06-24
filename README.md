@@ -43,7 +43,7 @@ Repository secrets:
 
 - `S3_ACCESS_KEY_ID`
 - `S3_SECRET_ACCESS_KEY`
-- `GPG_PRIVATE_KEY`
+- `GPG_PRIVATE_KEY_B64`
 - `GPG_PASSPHRASE` when the key is passphrase protected
 
 Repository variables:

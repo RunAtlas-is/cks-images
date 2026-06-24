@@ -81,7 +81,7 @@ jobs:
     env:
       AWS_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID || secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY || secrets.AWS_SECRET_ACCESS_KEY }}
-      GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+      GPG_PRIVATE_KEY_B64: ${{ secrets.GPG_PRIVATE_KEY_B64 }}
       GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
       FORCE_REBUILD: ${{ github.event.inputs.force_rebuild || 'false' }}
     steps:
@@ -92,7 +92,7 @@ jobs:
           set -euo pipefail
           test -n "${AWS_ACCESS_KEY_ID}" || { echo "S3_ACCESS_KEY_ID is missing" >&2; exit 1; }
           test -n "${AWS_SECRET_ACCESS_KEY}" || { echo "S3_SECRET_ACCESS_KEY is missing" >&2; exit 1; }
-          test -n "${GPG_PRIVATE_KEY}" || { echo "GPG_PRIVATE_KEY is missing" >&2; exit 1; }
+          test -n "${GPG_PRIVATE_KEY_B64}" || { echo "GPG_PRIVATE_KEY_B64 is missing" >&2; exit 1; }
 
       - name: Install prerequisites
         run: |
@@ -111,7 +111,7 @@ jobs:
           set -euo pipefail
           export GNUPGHOME="${RUNNER_TEMP}/gnupg"
           mkdir -m 700 -p "$GNUPGHOME"
-          printf '%s' "${GPG_PRIVATE_KEY}" | gpg --batch --import
+          printf '%s' "${GPG_PRIVATE_KEY_B64}" | base64 -d | gpg --batch --import
           echo "GNUPGHOME=$GNUPGHOME" >> "$GITHUB_ENV"
 
       - name: Ensure containerd is running
@@ -197,7 +197,7 @@ jobs:
     env:
       AWS_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID || secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY || secrets.AWS_SECRET_ACCESS_KEY }}
-      GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+      GPG_PRIVATE_KEY_B64: ${{ secrets.GPG_PRIVATE_KEY_B64 }}
       GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
     steps:
       - uses: actions/checkout@v7
@@ -218,10 +218,10 @@ jobs:
           set -euo pipefail
           test -n "${AWS_ACCESS_KEY_ID}" || { echo "S3_ACCESS_KEY_ID is missing" >&2; exit 1; }
           test -n "${AWS_SECRET_ACCESS_KEY}" || { echo "S3_SECRET_ACCESS_KEY is missing" >&2; exit 1; }
-          test -n "${GPG_PRIVATE_KEY}" || { echo "GPG_PRIVATE_KEY is missing" >&2; exit 1; }
+          test -n "${GPG_PRIVATE_KEY_B64}" || { echo "GPG_PRIVATE_KEY_B64 is missing" >&2; exit 1; }
           export GNUPGHOME="${RUNNER_TEMP}/gnupg"
           mkdir -m 700 -p "$GNUPGHOME"
-          printf '%s' "${GPG_PRIVATE_KEY}" | gpg --batch --import
+          printf '%s' "${GPG_PRIVATE_KEY_B64}" | base64 -d | gpg --batch --import
           echo "GNUPGHOME=$GNUPGHOME" >> "$GITHUB_ENV"
 
       - name: Sign artifacts and regenerate checksums
