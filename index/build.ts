@@ -288,20 +288,11 @@ function buildManifest(args: {
   };
 }
 
-function daysFromNow(iso: string): number {
-  const ms = new Date(iso + "T00:00:00Z").getTime() - Date.now();
-  return Math.round(ms / 86400000);
-}
-
 function dateCell(iso: string | undefined): { display: string; sortKey: string } {
   if (!iso) return { display: "&mdash;", sortKey: "9999-99-99" };
-  const days = daysFromNow(iso);
-  let color = "#666";
-  if (days < 0) color = "#a33";
-  else if (days < 60) color = "#a60";
-  const sign = days > 0 ? "+" : "";
-  const note = ` <span style="color:${color}">(${sign}${days}d)</span>`;
-  return { display: iso + note, sortKey: iso };
+  const safeIso = escape(iso);
+  const note = `<span class="relative-date" data-relative-date="${safeIso}"></span>`;
+  return { display: `${safeIso} ${note}`, sortKey: iso };
 }
 
 function formatFingerprint(fpr: string): string {
@@ -471,6 +462,29 @@ ${rows.join("\n")}
     if (numericRe.test(a) && numericRe.test(b)) return Number(a) - Number(b);
     return a < b ? -1 : a > b ? 1 : 0;
   };
+  const daysFromToday = (iso) => {
+    const parts = iso.split('-').map(Number);
+    if (parts.length !== 3 || parts.some(Number.isNaN)) return null;
+    const target = Date.UTC(parts[0], parts[1] - 1, parts[2]);
+    const now = new Date();
+    const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+    return Math.round((target - today) / 86400000);
+  };
+  const updateRelativeDates = () => {
+    document.querySelectorAll('[data-relative-date]').forEach((el) => {
+      const days = daysFromToday(el.dataset.relativeDate || '');
+      if (days == null) {
+        el.textContent = '';
+        return;
+      }
+      let color = '#666';
+      if (days < 0) color = '#a33';
+      else if (days < 60) color = '#a60';
+      const sign = days > 0 ? '+' : '';
+      el.style.color = color;
+      el.textContent = '(' + sign + days + 'd)';
+    });
+  };
   const render = () => {
     headers.forEach(h => h.querySelector('.arrow').textContent = '');
     if (dir.col == null) return;
@@ -495,6 +509,8 @@ ${rows.join("\n")}
       render();
     });
   });
+  updateRelativeDates();
+  setInterval(updateRelativeDates, 60 * 60 * 1000);
   render();
 })();
 </script>
