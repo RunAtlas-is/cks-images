@@ -139,22 +139,29 @@ async function fetchSha(key: string): Promise<string | null> {
 }
 
 async function fetchSupportMap(): Promise<SupportMap> {
-  try {
-    const r = await fetch("https://endoflife.date/api/kubernetes.json", {
-      signal: AbortSignal.timeout(15_000),
-    });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const arr = (await r.json()) as Array<{ cycle?: string; support?: string; eol?: string }>;
-    const out: SupportMap = {};
-    for (const e of arr) {
-      if (!e.cycle) continue;
-      out[e.cycle] = { maintenance: e.support, eol: e.eol };
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    try {
+      const r = await fetch("https://endoflife.date/api/kubernetes.json", {
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const arr = (await r.json()) as Array<{ cycle?: string; support?: string; eol?: string }>;
+      const out: SupportMap = {};
+      for (const e of arr) {
+        if (!e.cycle) continue;
+        out[e.cycle] = { maintenance: e.support, eol: e.eol };
+      }
+      return out;
+    } catch (err) {
+      lastError = err;
+      if (attempt < 4) {
+        console.warn(`[build] endoflife.date fetch attempt ${attempt} failed: ${err}`);
+        await new Promise((resolve) => setTimeout(resolve, attempt * 1500));
+      }
     }
-    return out;
-  } catch (err) {
-    console.error(`[build] endoflife.date fetch failed: ${err}`);
-    return {};
   }
+  throw new Error(`[build] endoflife.date fetch failed after retries: ${lastError}`);
 }
 
 function humanBytes(n: number): string {
@@ -288,11 +295,16 @@ function buildManifest(args: {
   };
 }
 
-function dateCell(iso: string | undefined): { display: string; sortKey: string } {
-  if (!iso) return { display: "&mdash;", sortKey: "9999-99-99" };
+function dateDisplay(iso: string | undefined): string {
+  if (!iso) return "&mdash;";
   const safeIso = escape(iso);
   const note = `<span class="relative-date" data-relative-date="${safeIso}"></span>`;
-  return { display: `${safeIso} ${note}`, sortKey: iso };
+  return `${safeIso} ${note}`;
+}
+
+function dateCell(iso: string | undefined): { display: string; sortKey: string } {
+  if (!iso) return { display: "&mdash;", sortKey: "9999-99-99" };
+  return { display: dateDisplay(iso), sortKey: iso };
 }
 
 function formatFingerprint(fpr: string): string {
@@ -330,6 +342,7 @@ function renderHtml(args: {
       const supInfo = support[iso.minorKey];
       const maint = dateCell(supInfo?.maintenance);
       const deadline = dateCell(supInfo?.eol);
+      const supportAttrs = `data-support-cycle="${escape(iso.minorKey)}"`;
       const sha = shaByIso.get(e.name);
       const hasAsc = ascNames.has(`${e.name}.asc`);
       const subLinks: string[] = [];
@@ -349,8 +362,8 @@ function renderHtml(args: {
           `<td data-sort="${escape(iso.cloudstackArch)}">${escape(iso.cloudstackArch)}</td>` +
           `<td data-sort="${modSort}" align="right">${escape(modH)}</td>` +
           `<td data-sort="${e.size}" align="right"><tt>${sizeH}</tt></td>` +
-          `<td data-sort="${maint.sortKey}">${maint.display}</td>` +
-          `<td data-sort="${deadline.sortKey}">${deadline.display}</td>` +
+          `<td data-sort="${maint.sortKey}" ${supportAttrs} data-support-field="maintenance">${maint.display}</td>` +
+          `<td data-sort="${deadline.sortKey}" ${supportAttrs} data-support-field="eol">${deadline.display}</td>` +
           `</tr>`,
       );
     } else {
@@ -485,6 +498,45 @@ ${rows.join("\n")}
       el.textContent = '(' + sign + days + 'd)';
     });
   };
+  const isIsoDate = (value) => /^\\d{4}-\\d{2}-\\d{2}$/.test(value || '');
+  const renderDateCell = (cell, iso) => {
+    cell.dataset.sort = isIsoDate(iso) ? iso : '9999-99-99';
+    cell.replaceChildren();
+    if (!isIsoDate(iso)) {
+      cell.textContent = '\\u2014';
+      return;
+    }
+    cell.append(document.createTextNode(iso + ' '));
+    const relative = document.createElement('span');
+    relative.className = 'relative-date';
+    relative.dataset.relativeDate = iso;
+    cell.append(relative);
+  };
+  const applyLifecycleData = (items) => {
+    const byCycle = new Map();
+    items.forEach((item) => {
+      if (item && typeof item.cycle === 'string') byCycle.set(item.cycle, item);
+    });
+    document.querySelectorAll('[data-support-cycle][data-support-field]').forEach((cell) => {
+      const info = byCycle.get(cell.dataset.supportCycle || '');
+      if (!info) return;
+      const field = cell.dataset.supportField === 'maintenance' ? 'support' : 'eol';
+      const iso = info[field];
+      if (isIsoDate(iso)) renderDateCell(cell, iso);
+    });
+    updateRelativeDates();
+    render();
+  };
+  const refreshLifecycleData = async () => {
+    try {
+      const response = await fetch('https://endoflife.date/api/kubernetes.json', { cache: 'no-store' });
+      if (!response.ok) throw new Error('HTTP ' + response.status);
+      const items = await response.json();
+      if (Array.isArray(items)) applyLifecycleData(items);
+    } catch (err) {
+      console.warn('Kubernetes lifecycle refresh failed', err);
+    }
+  };
   const render = () => {
     headers.forEach(h => h.querySelector('.arrow').textContent = '');
     if (dir.col == null) return;
@@ -510,6 +562,7 @@ ${rows.join("\n")}
     });
   });
   updateRelativeDates();
+  refreshLifecycleData();
   setInterval(updateRelativeDates, 60 * 60 * 1000);
   render();
 })();
@@ -523,6 +576,17 @@ async function main() {
   const [entries, support] = await Promise.all([listCks(), fetchSupportMap()]);
   const bareNames = entries.map((e) => stripPrefix(e.key));
   const ascNames = new Set(bareNames.filter((n) => n.endsWith(".asc")));
+  const isoMinors = Array.from(
+    new Set(
+      bareNames
+        .map((name) => parseIso(name)?.minorKey)
+        .filter((minor): minor is string => minor != null),
+    ),
+  ).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  const missingSupport = isoMinors.filter((minor) => !support[minor]?.maintenance || !support[minor]?.eol);
+  if (missingSupport.length) {
+    throw new Error(`[build] missing Kubernetes lifecycle dates for: ${missingSupport.join(", ")}`);
+  }
 
   const shaByIso = new Map<string, string>();
   const shaResults = await Promise.allSettled(
