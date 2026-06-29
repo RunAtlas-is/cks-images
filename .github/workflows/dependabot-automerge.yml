@@ -1,17 +1,10 @@
 name: Dependabot auto-merge
 
-# cks-images is a PUBLIC repository, so it cannot consume the private
-# RunAtlas-is/.github reusable workflow: GitHub does not allow public repos to
-# call reusable workflows (or actions) stored in private repos, and the call
-# fails at load time before any job runs. The org auto-merge policy is
-# therefore inlined here using only public components.
+# Patch and minor bumps, GitHub Actions updates, and Docker image (digest)
+# updates are approved and squash-merged automatically. Major bumps of other
+# ecosystems are left for manual review.
 #
-# Auto-merged without review: patch and minor bumps, GitHub Actions updates,
-# and Docker image (digest) updates. Major bumps of other ecosystems are left
-# for manual review; the OpenCode review path lives in the private reusable
-# workflow and is not available to public repos.
-#
-# Requires (already enabled on this repo): "Allow auto-merge" and squash merge.
+# Requires "Allow auto-merge" and squash merge enabled on the repository.
 
 on: pull_request
 
