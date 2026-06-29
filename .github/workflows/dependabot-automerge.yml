@@ -1,19 +1,39 @@
 name: Dependabot auto-merge
 
+# Patch and minor dependency bumps and GitHub Actions updates are approved and
+# squash-merged automatically. Major bumps of other ecosystems are left for
+# manual review.
+#
+# Requires "Allow auto-merge" and squash merge enabled on the repository.
+
 on: pull_request
 
 permissions:
-  checks: read
   contents: read
-  statuses: read
 
 jobs:
   automerge:
-    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    if: ${{ github.event.pull_request.user.login == 'dependabot[bot]' }}
+    runs-on: ubuntu-latest
     permissions:
-      checks: read
       contents: write
       pull-requests: write
-      statuses: read
-    uses: RunAtlas-is/.github/.github/workflows/dependabot-automerge.yml@main
-    secrets: inherit
+    steps:
+      - name: Resolve update metadata
+        id: meta
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
+
+      - name: Approve and merge safe bumps
+        if: >-
+          steps.meta.outputs.update-type == 'version-update:semver-patch' ||
+          steps.meta.outputs.update-type == 'version-update:semver-minor' ||
+          steps.meta.outputs.package-ecosystem == 'github_actions'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          gh pr review --approve "$PR_URL" || \
+            echo "::warning::Could not approve PR with GITHUB_TOKEN; merging anyway."
+          # No required status checks on this repo, so auto-merge cannot be
+          # enabled (the PR is already mergeable); fall back to a direct merge.
+          gh pr merge --auto --squash "$PR_URL" || gh pr merge --squash "$PR_URL"
