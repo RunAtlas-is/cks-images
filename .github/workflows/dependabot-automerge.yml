@@ -1,0 +1,19 @@
+name: Dependabot auto-merge
+
+on: pull_request
+
+permissions:
+  checks: read
+  contents: read
+  statuses: read
+
+jobs:
+  automerge:
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    permissions:
+      checks: read
+      contents: write
+      pull-requests: write
+      statuses: read
+    uses: RunAtlas-is/.github/.github/workflows/dependabot-automerge.yml@main
+    secrets: inherit
