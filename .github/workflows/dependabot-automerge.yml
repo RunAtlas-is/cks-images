@@ -1,19 +1,45 @@
 name: Dependabot auto-merge
 
+# cks-images is a PUBLIC repository, so it cannot consume the private
+# RunAtlas-is/.github reusable workflow: GitHub does not allow public repos to
+# call reusable workflows (or actions) stored in private repos, and the call
+# fails at load time before any job runs. The org auto-merge policy is
+# therefore inlined here using only public components.
+#
+# Auto-merged without review: patch and minor bumps, GitHub Actions updates,
+# and Docker image (digest) updates. Major bumps of other ecosystems are left
+# for manual review; the OpenCode review path lives in the private reusable
+# workflow and is not available to public repos.
+#
+# Requires (already enabled on this repo): "Allow auto-merge" and squash merge.
+
 on: pull_request
 
 permissions:
-  checks: read
   contents: read
-  statuses: read
 
 jobs:
   automerge:
-    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    if: ${{ github.event.pull_request.user.login == 'dependabot[bot]' }}
+    runs-on: ubuntu-latest
     permissions:
-      checks: read
       contents: write
       pull-requests: write
-      statuses: read
-    uses: RunAtlas-is/.github/.github/workflows/dependabot-automerge.yml@main
-    secrets: inherit
+    steps:
+      - name: Resolve update metadata
+        id: meta
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
+
+      - name: Approve and enable auto-merge for safe bumps
+        if: >-
+          steps.meta.outputs.update-type == 'version-update:semver-patch' ||
+          steps.meta.outputs.update-type == 'version-update:semver-minor' ||
+          steps.meta.outputs.package-ecosystem == 'github_actions' ||
+          steps.meta.outputs.package-ecosystem == 'docker_compose'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          gh pr review --approve "$PR_URL" || \
+            echo "::warning::Could not approve PR with GITHUB_TOKEN; enabling auto-merge anyway."
+          gh pr merge --auto --squash "$PR_URL"
