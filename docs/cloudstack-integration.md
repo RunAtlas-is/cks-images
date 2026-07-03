@@ -22,8 +22,6 @@ Use one CloudStack supported version per Kubernetes patch version.
 - Existing tenant clusters should not be upgraded transparently. Patch upgrades
   should be explicit tenant/admin actions through CloudStack's
   `upgradeKubernetesCluster` API after basic validation.
-- Older patch versions can stay enabled while tenants are using them. Disable an
-  old patch only after deciding that no new clusters should be created on it.
 - Do not use `force_rebuild` for a patch version that is already registered in
   CloudStack unless the old object is intentionally revoked and the registration
   is repaired manually.
@@ -32,6 +30,35 @@ CloudStack supports upgrading a running CloudManaged Kubernetes cluster by
 passing the target supported-version ID to `upgradeKubernetesCluster`:
 
 <https://cloudstack.apache.org/api/apidocs-4.22/apis/upgradeKubernetesCluster.html>
+
+## Version Lifecycle
+
+The sync script drives the full state lifecycle of registered versions. Each
+run applies these rules per zone, only to versions whose semantic version
+appears in the manifest for the selected arch; operator-registered custom
+versions are never touched:
+
+- **Register**: the newest patch of every in-support minor
+  (`--latest-per-minor`) that is not yet registered. The ISO downloads through
+  the zone's secondary storage VM and the version becomes usable when the ISO
+  reaches `Ready`.
+- **Disable superseded** (`--disable-superseded`): once a newer patch of the
+  same minor has a `Ready` ISO, older enabled patches of that minor are
+  disabled. The replacement being `Ready` is a precondition, so tenant capacity
+  never shrinks before its successor is usable.
+- **Disable EOL** (`--disable-eol`): enabled versions whose Kubernetes minor is
+  past its manifest `lifecycle.eol` date are disabled.
+- **Stall detection** (`--fail-on-stalled`): a registered version whose ISO is
+  still not `Ready` after `--stalled-after-hours` (default 12, env
+  `CKS_STALLED_AFTER_HOURS`) makes the run exit non-zero so the scheduler's
+  failure alerting fires.
+
+Disabling is non-destructive: running clusters keep working and can still
+upgrade to a newer enabled version; only new-cluster creation on the disabled
+version is blocked. Deleting versions (`deleteKubernetesSupportedVersion`) and
+revoking artifacts stay manual operator actions, taken only for disabled
+versions with no clusters still referencing them. Cluster upgrades also stay
+explicit (`upgradeKubernetesCluster`); the sync never touches clusters.
 
 ## Registration Model
 

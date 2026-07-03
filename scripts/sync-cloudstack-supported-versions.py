@@ -283,6 +283,102 @@ def register_image(
     print(f"[cloudstack] registered {version} in zone {zone_id}: {created_id}")
 
 
+def manifest_version_index(manifest: dict[str, Any], arch: str) -> dict[str, dict[str, Any]]:
+    """Map semantic version -> {minor, eol} for every manifest image of the arch.
+
+    The index intentionally covers all manifest images, including EOL ones, so
+    state reconciliation can disable registered versions that the selection
+    filters no longer return. Versions absent from the manifest are never
+    touched: they are not owned by this pipeline.
+    """
+    index: dict[str, dict[str, Any]] = {}
+    for image in manifest.get("images", []):
+        if not isinstance(image, dict):
+            continue
+        cloudstack = image.get("cloudstack")
+        if not isinstance(cloudstack, dict) or cloudstack.get("arch") != arch:
+            continue
+        version = str(cloudstack.get("semanticVersion") or image.get("version") or "")
+        if not version:
+            continue
+        lifecycle = image.get("lifecycle") if isinstance(image.get("lifecycle"), dict) else {}
+        index[version] = {"minor": str(image.get("minor")), "eol": lifecycle.get("eol")}
+    return index
+
+
+def parse_cloudstack_time(value: Any) -> dt.datetime | None:
+    try:
+        return dt.datetime.strptime(str(value), "%Y-%m-%dT%H:%M:%S%z")
+    except ValueError:
+        return None
+
+
+def reconcile_states(
+    cs: CloudStack,
+    zone_id: str,
+    index: dict[str, dict[str, Any]],
+    args: argparse.Namespace,
+) -> list[str]:
+    """Disable superseded/EOL registered versions and report stalled ISOs.
+
+    Only versions whose semantic version appears in the manifest are managed.
+    Disabling never removes anything: running clusters keep working and can
+    still upgrade to a newer enabled version; only new-cluster creation on the
+    disabled version is blocked.
+    """
+    now = dt.datetime.now(dt.timezone.utc)
+    today = now.date()
+    existing = supported_versions(cs.listKubernetesSupportedVersions(zoneid=zone_id, arch=args.arch))
+    managed = [item for item in existing if str(item.get("semanticversion")) in index]
+
+    ready_newest: dict[str, tuple[int, int, int]] = {}
+    for item in managed:
+        if str(item.get("isostate")) != "Ready":
+            continue
+        minor = index[str(item.get("semanticversion"))]["minor"]
+        key = semver_key(item.get("semanticversion"))
+        if minor not in ready_newest or key > ready_newest[minor]:
+            ready_newest[minor] = key
+
+    stalled: list[str] = []
+    for item in managed:
+        version = str(item.get("semanticversion"))
+        minor = index[version]["minor"]
+        item_id = item.get("id")
+
+        if str(item.get("isostate")) != "Ready":
+            created = parse_cloudstack_time(item.get("created"))
+            age_hours = (now - created).total_seconds() / 3600 if created else None
+            if age_hours is None or age_hours >= args.stalled_after_hours:
+                age_text = f"{round(age_hours)}h" if age_hours is not None else "unknown age"
+                stalled.append(
+                    f"{version} in zone {zone_id} ({item_id}): ISO state "
+                    f"{item.get('isostate')} after {age_text}"
+                )
+
+        reason = None
+        if args.disable_eol:
+            eol = index[version].get("eol")
+            if isinstance(eol, str) and eol:
+                try:
+                    if dt.date.fromisoformat(eol) < today:
+                        reason = f"Kubernetes {minor} is past EOL ({eol})"
+                except ValueError:
+                    pass
+        if reason is None and args.disable_superseded:
+            newest_ready = ready_newest.get(minor)
+            if newest_ready and semver_key(version) < newest_ready:
+                reason = f"superseded by a Ready {minor} patch"
+        if reason is None or str(item.get("state") or "").lower() != "enabled":
+            continue
+        if args.dry_run:
+            print(f"[cloudstack] dry-run: would disable {version} in zone {zone_id}: {reason}")
+        else:
+            cs.updateKubernetesSupportedVersion(id=item_id, state="Disabled")
+            print(f"[cloudstack] disabled {version} in zone {zone_id}: {reason}")
+    return stalled
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest-url", default=os.environ.get("CKS_MANIFEST_URL", DEFAULT_MANIFEST_URL))
@@ -296,6 +392,27 @@ def main() -> None:
     parser.add_argument("--latest-per-minor", action="store_true", help="Sync only the newest patch for each selected minor.")
     parser.add_argument("--include-eol", action="store_true", help="Include images whose Kubernetes minor is past EOL.")
     parser.add_argument("--enable-existing", action="store_true", help="Enable matching disabled supported versions.")
+    parser.add_argument(
+        "--disable-superseded",
+        action="store_true",
+        help="Disable enabled versions of a minor once a newer patch of that minor has a Ready ISO.",
+    )
+    parser.add_argument(
+        "--disable-eol",
+        action="store_true",
+        help="Disable enabled versions whose Kubernetes minor is past EOL per the manifest lifecycle.",
+    )
+    parser.add_argument(
+        "--fail-on-stalled",
+        action="store_true",
+        help="Exit non-zero when a registered version's ISO is still not Ready past the stall window.",
+    )
+    parser.add_argument(
+        "--stalled-after-hours",
+        type=float,
+        default=float(os.environ.get("CKS_STALLED_AFTER_HOURS", "12")),
+        help="Age in hours before a non-Ready ISO counts as stalled.",
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--key-url", help="Override manifest signing key URL.")
     parser.add_argument("--signing-fingerprint", default=os.environ.get("GPG_SIGNING_FINGERPRINT"))
@@ -309,17 +426,29 @@ def main() -> None:
 
     manifest = fetch_json(args.manifest_url)
     images = selected_images(manifest, args)
+    reconcile = args.disable_superseded or args.disable_eol or args.fail_on_stalled
     if not images:
         print("[cloudstack] no manifest images matched the selected filters")
-        return
+        if not reconcile:
+            return
 
-    verify_images(manifest, images, args)
+    if images:
+        verify_images(manifest, images, args)
 
     cs = CloudStack(endpoint=endpoint, key=api_key, secret=secret_key, timeout=120)
+    index = manifest_version_index(manifest, args.arch)
+    stalled: list[str] = []
     for zone_id in zones:
         existing = supported_versions(cs.listKubernetesSupportedVersions(zoneid=zone_id, arch=args.arch))
         for image in images:
             register_image(cs, image, zone_id, existing, args)
+        if reconcile:
+            stalled.extend(reconcile_states(cs, zone_id, index, args))
+
+    for line in stalled:
+        print(f"[cloudstack] stalled: {line}", file=sys.stderr)
+    if stalled and args.fail_on_stalled:
+        sys.exit(1)
 
 
 if __name__ == "__main__":
