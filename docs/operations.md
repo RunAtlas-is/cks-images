@@ -115,10 +115,10 @@ Local builds use the same script as CI:
 
 ```bash
 export K8S_VERSION=1.33.11
-export CNI_VERSION=1.6.2
-export CRICTL_VERSION=1.33.0
-export HEADLAMP_VERSION=0.25.0
-export CNI_YAML_URL=https://raw.githubusercontent.com/projectcalico/calico/v3.29.0/manifests/calico.yaml
+export CNI_VERSION=1.9.1
+export CRICTL_VERSION=1.36.0
+export HEADLAMP_VERSION=0.43.0
+export CNI_YAML_URL=https://raw.githubusercontent.com/projectcalico/calico/v3.32.1/manifests/calico.yaml
 
 ./scripts/build-iso.sh
 ```

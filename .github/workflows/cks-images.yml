@@ -38,10 +38,10 @@ env:
   DOCS_URL: ${{ vars.DOCS_URL || 'https://github.com/RunAtlas-is/cks-images/blob/main/docs/operations.md' }}
   SIGNING_KEY: ${{ vars.GPG_SIGNING_KEY || 'artifacts@runatlas.is' }}
   SIGNING_FINGERPRINT: ${{ vars.GPG_SIGNING_FINGERPRINT || '4C2D72FDDEF77A5CC4A7D2C421CA4588DCB6991E' }}
-  CNI_VERSION: ${{ vars.CNI_VERSION || '1.6.2' }}
-  CRICTL_VERSION: ${{ vars.CRICTL_VERSION || '1.33.0' }}
-  HEADLAMP_VERSION: ${{ vars.HEADLAMP_VERSION || '0.25.0' }}
-  CNI_YAML_URL: ${{ vars.CNI_YAML_URL || 'https://raw.githubusercontent.com/projectcalico/calico/v3.29.0/manifests/calico.yaml' }}
+  CNI_VERSION: ${{ vars.CNI_VERSION || '1.9.1' }}
+  CRICTL_VERSION: ${{ vars.CRICTL_VERSION || '1.36.0' }}
+  HEADLAMP_VERSION: ${{ vars.HEADLAMP_VERSION || '0.43.0' }}
+  CNI_YAML_URL: ${{ vars.CNI_YAML_URL || 'https://raw.githubusercontent.com/projectcalico/calico/v3.32.1/manifests/calico.yaml' }}
 
 jobs:
   minors:
