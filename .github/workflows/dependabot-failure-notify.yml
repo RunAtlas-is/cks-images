@@ -1,0 +1,27 @@
+name: Dependabot failure notify
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: read
+  pull-requests: read
+
+jobs:
+  notify:
+    if: >-
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.actor.login == 'dependabot[bot]'
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+    uses: RunAtlas-is/.github/.github/workflows/dependabot-failure-notify.yml@main
+    with:
+      # Same list as on.workflow_run.workflows above; used for duplicate
+      # suppression.
+      ci-workflows: "CI"
+    secrets: inherit
