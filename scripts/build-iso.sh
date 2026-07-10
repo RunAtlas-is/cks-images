@@ -3,8 +3,8 @@
 # upload it to an S3-compatible bucket.
 #
 # Wraps upstream create-kubernetes-binaries-iso.sh from apache/cloudstack.
-# Pulls the upstream script fresh on every run so we stay in sync with
-# whatever CKS version the management server expects.
+# Fetches the upstream script at the commit pinned in UPSTREAM_REF so builds
+# are reproducible; bump the pin after reviewing the upstream diff.
 #
 # Required env:
 #   K8S_VERSION           e.g. 1.33.1 (no leading v)
@@ -78,12 +78,17 @@ sha256sum "$iso_path" > "${iso_path}.sha256"
 if [[ -n "${SIGNING_KEY:-}" ]] && gpg --batch --list-secret-keys "$SIGNING_KEY" >/dev/null 2>&1; then
   gpg_args=(--batch --yes --local-user "$SIGNING_KEY")
   if [[ -n "${GPG_PASSPHRASE:-}" ]]; then
-    gpg_args+=(--pinentry-mode loopback --passphrase "$GPG_PASSPHRASE")
+    # Feed the passphrase on fd 0 so it never appears in the process listing.
+    gpg "${gpg_args[@]}" --pinentry-mode loopback --passphrase-fd 0 \
+      --armor --detach-sign \
+      --output "${iso_path}.asc" \
+      "$iso_path" <<<"$GPG_PASSPHRASE"
+  else
+    gpg "${gpg_args[@]}" \
+      --armor --detach-sign \
+      --output "${iso_path}.asc" \
+      "$iso_path"
   fi
-  gpg "${gpg_args[@]}" \
-    --armor --detach-sign \
-    --output "${iso_path}.asc" \
-    "$iso_path"
   echo ">> Signed $iso_path -> ${iso_path}.asc"
 fi
 

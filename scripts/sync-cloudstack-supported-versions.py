@@ -30,6 +30,10 @@ except ImportError:  # pragma: no cover - exercised by shell validation.
 
 DEFAULT_MANIFEST_URL = "https://runatlas-is.github.io/cks-images/manifest.json"
 
+# Atlas Cloud artifact signing key. The pin lives here, outside the manifest,
+# so a tampered manifest cannot supply its own key and fingerprint pair.
+DEFAULT_SIGNING_FINGERPRINT = "4C2D72FDDEF77A5CC4A7D2C421CA4588DCB6991E"
+
 
 def required_env(name: str) -> str:
     value = os.environ.get(name)
@@ -198,9 +202,11 @@ def verify_images(manifest: dict[str, Any], images: list[dict[str, Any]], args: 
 
     signing = manifest.get("signingKey") if isinstance(manifest.get("signingKey"), dict) else {}
     key_url = args.key_url or signing.get("url")
-    fingerprint = args.signing_fingerprint or signing.get("fingerprint")
+    # The fingerprint deliberately never falls back to the manifest: a
+    # manifest-supplied pin would make verification self-referential.
+    fingerprint = args.signing_fingerprint
     if not key_url or not fingerprint:
-        sys.exit("Manifest signing key URL and fingerprint are required")
+        sys.exit("Signing key URL and pinned fingerprint are required")
 
     cache_root = Path(os.environ.get("CKS_SYNC_TMPDIR", ".cache"))
     cache_root.mkdir(parents=True, exist_ok=True)
@@ -415,7 +421,10 @@ def main() -> None:
     )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--key-url", help="Override manifest signing key URL.")
-    parser.add_argument("--signing-fingerprint", default=os.environ.get("GPG_SIGNING_FINGERPRINT"))
+    parser.add_argument(
+        "--signing-fingerprint",
+        default=os.environ.get("GPG_SIGNING_FINGERPRINT") or DEFAULT_SIGNING_FINGERPRINT,
+    )
     parser.add_argument("--skip-gpg-verify", action="store_true", help="Skip signed checksum verification.")
     args = parser.parse_args()
 
