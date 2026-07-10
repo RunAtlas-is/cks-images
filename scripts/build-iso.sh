@@ -8,10 +8,10 @@
 #
 # Required env:
 #   K8S_VERSION           e.g. 1.33.1 (no leading v)
-#   CNI_VERSION           e.g. 1.6.2
-#   CRICTL_VERSION        e.g. 1.33.0
+#   CNI_VERSION           e.g. 1.9.1
+#   CRICTL_VERSION        e.g. 1.36.0
 #   CNI_YAML_URL          e.g. Calico manifest URL
-#   HEADLAMP_VERSION      e.g. 0.25.0
+#   HEADLAMP_VERSION      e.g. 0.43.0
 #
 # Optional env:
 #   ARCH                  amd64 (default) | arm64
