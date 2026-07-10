@@ -89,6 +89,17 @@ Every ISO gets a detached GPG signature when the signing key is available in CI.
 `scripts/sign-artifacts.sh` also regenerates one signed checksum set per
 Kubernetes minor.
 
+The bucket prefix is shared storage, so presence in the bucket is not treated
+as provenance. The sign step only signs and lists an ISO when its digest is
+established by the current run's build manifest (emitted by the build job), by
+an entry in an already-published `CHECKSUM-<minor>` whose signature verifies
+against the pinned fingerprint, or by an existing `.asc` on the ISO that
+verifies against the pinned key. Any other ISO object under the prefix is
+skipped, excluded from the checksum sets, and fails the run so the object can
+be investigated and removed. When running the script outside CI, pass
+`BUILT_DIGESTS_FILE` (lines of `sha256  filename`) for ISOs that are not yet
+covered by a signed checksum set.
+
 Required GitHub secrets:
 
 - `GPG_PRIVATE_KEY_B64`

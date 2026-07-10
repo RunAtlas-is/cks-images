@@ -17,6 +17,7 @@ publishes the static catalog through GitHub Pages.
 ```text
 .
 ├── .github/workflows/cks-images.yml   daily builds, signing, Pages deploy
+├── .github/workflows/ci.yml           pull request and main validation
 ├── docs/                              operations and CloudStack integration
 ├── index/                             Bun static catalog generator
 ├── keys/                              public artifact signing key
