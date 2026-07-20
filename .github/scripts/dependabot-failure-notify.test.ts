@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import {
   composeFailureMessage,
+  escapeSlack,
   parseWorkflowNames,
   runNotifier,
   shouldPostForRuns,
@@ -59,6 +60,23 @@ describe("duplicate suppression", () => {
     expect(shouldPostForRuns(runs, ["Testing", "Quality checks"], 99)).toBe(
       true,
     );
+  });
+});
+
+describe("escapeSlack", () => {
+  test("escapes all three special characters in a single pass", () => {
+    expect(escapeSlack("<a & b>")).toBe("&lt;a &amp; b&gt;");
+  });
+
+  test("does not double-escape an ampersand introduced by escaping", () => {
+    // The single-pass replace must not re-process the & in &lt;/&gt;; the only
+    // &amp; in the output is the one escaping the literal input ampersand.
+    expect(escapeSlack("<&>")).toBe("&lt;&amp;&gt;");
+    expect(escapeSlack("&lt;")).toBe("&amp;lt;");
+  });
+
+  test("leaves ordinary text untouched", () => {
+    expect(escapeSlack("plain text 123")).toBe("plain text 123");
   });
 });
 

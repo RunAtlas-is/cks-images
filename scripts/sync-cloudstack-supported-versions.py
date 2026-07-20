@@ -18,6 +18,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -34,6 +35,33 @@ DEFAULT_MANIFEST_URL = "https://runatlas-is.github.io/cks-images/manifest.json"
 # so a tampered manifest cannot supply its own key and fingerprint pair.
 DEFAULT_SIGNING_FINGERPRINT = "4C2D72FDDEF77A5CC4A7D2C421CA4588DCB6991E"
 
+# Hosts this script is allowed to fetch from. The manifest lives on GitHub Pages
+# (runatlas-is.github.io); the signing key defaults to the same site; checksum
+# sets, signatures, and image artifacts live in object storage (s3.runatlas.is).
+# Every URL reaching urlopen originates as either an operator/CI-provided URL or
+# a manifest-derived one, and its content is separately GPG-verified against the
+# pinned fingerprint above. This allowlist is defence in depth: it refuses any
+# scheme other than https or any host outside the trusted set before a request
+# is ever made. Operators pointing --manifest-url/--key-url at an alternate
+# mirror can extend the set via CKS_ALLOWED_HOSTS (comma-separated hostnames).
+ALLOWED_FETCH_HOSTS = frozenset({"runatlas-is.github.io", "s3.runatlas.is"})
+
+
+def _allowed_fetch_hosts() -> frozenset[str]:
+    extra = os.environ.get("CKS_ALLOWED_HOSTS", "")
+    return ALLOWED_FETCH_HOSTS | frozenset(
+        part.strip().lower() for part in extra.split(",") if part.strip()
+    )
+
+
+def _ensure_allowed_url(url: str) -> None:
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme != "https":
+        sys.exit(f"Refusing to fetch non-https URL: {url}")
+    host = (parsed.hostname or "").lower()
+    if host not in _allowed_fetch_hosts():
+        sys.exit(f"Refusing to fetch URL from untrusted host {host!r}: {url}")
+
 
 def required_env(name: str) -> str:
     value = os.environ.get(name)
@@ -43,6 +71,7 @@ def required_env(name: str) -> str:
 
 
 def fetch_bytes(url: str, timeout: int = 30) -> bytes:
+    _ensure_allowed_url(url)
     with urllib.request.urlopen(url, timeout=timeout) as response:
         return response.read()
 
