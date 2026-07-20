@@ -80,11 +80,14 @@ export function shouldPostForRuns(
   );
 }
 
+const SLACK_ESCAPE_MAP: Record<string, string> = {
+  "&": "&amp;",
+  "<": "&lt;",
+  ">": "&gt;",
+};
+
 export function escapeSlack(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;");
+  return value.replace(/[&<>]/g, (char) => SLACK_ESCAPE_MAP[char]);
 }
 
 export function composeFailureMessage(context: {
