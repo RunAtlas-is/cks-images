@@ -72,6 +72,10 @@ def required_env(name: str) -> str:
 
 def fetch_bytes(url: str, timeout: int = 30) -> bytes:
     _ensure_allowed_url(url)
+    # The URL is not attacker-controlled by the time it reaches here:
+    # _ensure_allowed_url above rejects any non-https scheme and any host
+    # outside the allowlist, so the dynamic argument is already constrained.
+    # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
     with urllib.request.urlopen(url, timeout=timeout) as response:
         return response.read()
 
