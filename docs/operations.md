@@ -117,7 +117,8 @@ Local builds use the same script as CI:
 export K8S_VERSION=1.33.11
 export CNI_VERSION=1.9.1
 export CRICTL_VERSION=1.36.0
-export HEADLAMP_VERSION=0.43.0
+export CLOUDSTACK_VERSION=4.22.1.0
+export DASHBOARD_YAML_URL=https://raw.githubusercontent.com/kubernetes/dashboard/v2.7.0/aio/deploy/recommended.yaml
 export CNI_YAML_URL=https://raw.githubusercontent.com/projectcalico/calico/v3.32.1/manifests/calico.yaml
 
 ./scripts/build-iso.sh
