@@ -377,21 +377,35 @@ def reconcile_states(
     zone_id: str,
     index: dict[str, dict[str, Any]],
     args: argparse.Namespace,
+    artifact_base: str | None = None,
 ) -> list[str]:
     """Disable superseded/EOL/drifted registered versions and report stalled ISOs.
 
-    Only versions whose semantic version appears in the manifest are managed.
-    A drifted entry (same version, different ISO URL than the manifest) is
-    disabled as soon as the manifest's own artifact for that version is Ready,
-    so a rebuilt artifact replaces a stale one without a gap in availability.
-    Disabling never removes anything: running clusters keep working and can
-    still upgrade to a newer enabled version; only new-cluster creation on the
-    disabled version is blocked.
+    A version in the manifest is managed directly. A registered entry absent
+    from the manifest is still pipeline-owned when its ISO URL lives under the
+    manifest's artifact store (artifact_base); that happens when the manifest
+    stops offering an artifact, for example after a CloudStack format bump
+    renames the whole matrix. Such orphaned entries are retired by the
+    superseded rule once a Ready newer patch of their minor exists. Entries
+    pointing anywhere else (operator-registered custom versions) are never
+    touched. A drifted entry (same version, different ISO URL than the
+    manifest) is disabled as soon as the manifest's own artifact for that
+    version is Ready, so a rebuilt artifact replaces a stale one without a gap
+    in availability. Disabling never removes anything: running clusters keep
+    working and can still upgrade to a newer enabled version; only new-cluster
+    creation on the disabled version is blocked.
     """
     now = dt.datetime.now(dt.timezone.utc)
     today = now.date()
     existing = supported_versions(cs.listKubernetesSupportedVersions(zoneid=zone_id, arch=args.arch))
     managed = [item for item in existing if str(item.get("semanticversion")) in index]
+    orphaned = [
+        item
+        for item in existing
+        if artifact_base
+        and str(item.get("semanticversion")) not in index
+        and str(item.get("isourl") or "").startswith(artifact_base)
+    ]
 
     ready_newest: dict[str, tuple[int, int, int]] = {}
     current_ready: set[str] = set()
@@ -447,6 +461,22 @@ def reconcile_states(
         else:
             cs.updateKubernetesSupportedVersion(id=item_id, state="Disabled")
             print(f"[cloudstack] disabled {version} in zone {zone_id}: {reason}")
+
+    if args.disable_superseded:
+        for item in orphaned:
+            version = str(item.get("semanticversion"))
+            minor = ".".join(version.split(".")[:2])
+            newest_ready = ready_newest.get(minor)
+            if not newest_ready or semver_key(version) >= newest_ready:
+                continue
+            if str(item.get("state") or "").lower() != "enabled":
+                continue
+            reason = f"superseded by a Ready {minor} patch; artifact no longer in the manifest"
+            if args.dry_run:
+                print(f"[cloudstack] dry-run: would disable {version} in zone {zone_id}: {reason}")
+            else:
+                cs.updateKubernetesSupportedVersion(id=item.get("id"), state="Disabled")
+                print(f"[cloudstack] disabled {version} in zone {zone_id}: {reason}")
     return stalled
 
 
@@ -511,13 +541,18 @@ def main() -> None:
 
     cs = CloudStack(endpoint=endpoint, key=api_key, secret=secret_key, timeout=120)
     index = manifest_version_index(manifest, args.arch)
+    artifact_base = None
+    base_url = str(manifest.get("artifactBaseUrl") or "").rstrip("/")
+    storage = manifest.get("storage") if isinstance(manifest.get("storage"), dict) else {}
+    if base_url:
+        artifact_base = f"{base_url}/{str(storage.get('prefix') or '')}"
     stalled: list[str] = []
     for zone_id in zones:
         existing = supported_versions(cs.listKubernetesSupportedVersions(zoneid=zone_id, arch=args.arch))
         for image in images:
             register_image(cs, image, zone_id, existing, args)
         if reconcile:
-            stalled.extend(reconcile_states(cs, zone_id, index, args))
+            stalled.extend(reconcile_states(cs, zone_id, index, args, artifact_base))
 
     for line in stalled:
         print(f"[cloudstack] stalled: {line}", file=sys.stderr)

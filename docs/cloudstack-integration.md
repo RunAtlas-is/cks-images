@@ -75,7 +75,11 @@ versions are never touched:
 - **Disable superseded** (`--disable-superseded`): once a newer patch of the
   same minor has a `Ready` ISO, older enabled patches of that minor are
   disabled. The replacement being `Ready` is a precondition, so tenant capacity
-  never shrinks before its successor is usable.
+  never shrinks before its successor is usable. This also covers orphaned
+  entries: a registered version the manifest no longer offers is still
+  pipeline-owned when its ISO URL lives under the manifest's artifact store
+  (as after a format bump renames the matrix), and retires the same way.
+  Entries pointing anywhere else are operator-registered and never touched.
 - **Disable EOL** (`--disable-eol`): enabled versions whose Kubernetes minor is
   past its manifest `lifecycle.eol` date are disabled.
 - **Stall detection** (`--fail-on-stalled`): a registered version whose ISO is
