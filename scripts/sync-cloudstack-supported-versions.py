@@ -72,11 +72,17 @@ def required_env(name: str) -> str:
 
 def fetch_bytes(url: str, timeout: int = 30) -> bytes:
     _ensure_allowed_url(url)
+    # GitHub Pages' CDN rejects the default Python-urllib user agent with 403,
+    # so every fetch identifies itself explicitly.
+    request = urllib.request.Request(
+        url,
+        headers={"User-Agent": "cks-version-sync (+https://github.com/RunAtlas-is/cks-images)"},
+    )
     # The URL is not attacker-controlled by the time it reaches here:
     # _ensure_allowed_url above rejects any non-https scheme and any host
     # outside the allowlist, so the dynamic argument is already constrained.
     # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
-    with urllib.request.urlopen(url, timeout=timeout) as response:
+    with urllib.request.urlopen(request, timeout=timeout) as response:
         return response.read()
 
 
