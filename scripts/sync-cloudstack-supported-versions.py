@@ -291,6 +291,14 @@ def register_image(
         same_arch = not item.get("arch") or item.get("arch") == arch
         if not (same_version and same_zone and same_arch):
             continue
+        # A registered entry only satisfies the manifest when it points at the
+        # manifest's artifact. A same-version entry with a different ISO URL is
+        # a stale build (for example one produced for a different CloudStack
+        # release contract); fall through and register the manifest artifact,
+        # and let reconcile_states retire the drifted entry once the
+        # replacement's ISO is Ready.
+        if str(item.get("isourl") or "") != str(image["url"]):
+            continue
         state = str(item.get("state") or "Enabled")
         item_id = item.get("id")
         print(f"[cloudstack] {version} already registered in zone {zone_id} ({item_id}, state={state})")
@@ -323,12 +331,14 @@ def register_image(
 
 
 def manifest_version_index(manifest: dict[str, Any], arch: str) -> dict[str, dict[str, Any]]:
-    """Map semantic version -> {minor, eol} for every manifest image of the arch.
+    """Map semantic version -> {minor, eol, url} for every manifest image of the arch.
 
     The index intentionally covers all manifest images, including EOL ones, so
     state reconciliation can disable registered versions that the selection
     filters no longer return. Versions absent from the manifest are never
-    touched: they are not owned by this pipeline.
+    touched: they are not owned by this pipeline. The url is the manifest's
+    current artifact for the version; a registered entry pointing anywhere
+    else is a stale build to be superseded.
     """
     index: dict[str, dict[str, Any]] = {}
     for image in manifest.get("images", []):
@@ -341,7 +351,11 @@ def manifest_version_index(manifest: dict[str, Any], arch: str) -> dict[str, dic
         if not version:
             continue
         lifecycle = image.get("lifecycle") if isinstance(image.get("lifecycle"), dict) else {}
-        index[version] = {"minor": str(image.get("minor")), "eol": lifecycle.get("eol")}
+        index[version] = {
+            "minor": str(image.get("minor")),
+            "eol": lifecycle.get("eol"),
+            "url": str(image.get("url") or ""),
+        }
     return index
 
 
@@ -358,9 +372,12 @@ def reconcile_states(
     index: dict[str, dict[str, Any]],
     args: argparse.Namespace,
 ) -> list[str]:
-    """Disable superseded/EOL registered versions and report stalled ISOs.
+    """Disable superseded/EOL/drifted registered versions and report stalled ISOs.
 
     Only versions whose semantic version appears in the manifest are managed.
+    A drifted entry (same version, different ISO URL than the manifest) is
+    disabled as soon as the manifest's own artifact for that version is Ready,
+    so a rebuilt artifact replaces a stale one without a gap in availability.
     Disabling never removes anything: running clusters keep working and can
     still upgrade to a newer enabled version; only new-cluster creation on the
     disabled version is blocked.
@@ -371,21 +388,28 @@ def reconcile_states(
     managed = [item for item in existing if str(item.get("semanticversion")) in index]
 
     ready_newest: dict[str, tuple[int, int, int]] = {}
+    current_ready: set[str] = set()
     for item in managed:
         if str(item.get("isostate")) != "Ready":
             continue
-        minor = index[str(item.get("semanticversion"))]["minor"]
-        key = semver_key(item.get("semanticversion"))
+        version = str(item.get("semanticversion"))
+        minor = index[version]["minor"]
+        key = semver_key(version)
         if minor not in ready_newest or key > ready_newest[minor]:
             ready_newest[minor] = key
+        if str(item.get("isourl") or "") == index[version]["url"]:
+            current_ready.add(version)
 
     stalled: list[str] = []
     for item in managed:
         version = str(item.get("semanticversion"))
         minor = index[version]["minor"]
         item_id = item.get("id")
+        matches_manifest = str(item.get("isourl") or "") == index[version]["url"]
 
-        if str(item.get("isostate")) != "Ready":
+        # Only the manifest's current artifact is expected to reach Ready; a
+        # drifted entry is on its way out and must not trip the stall alarm.
+        if matches_manifest and str(item.get("isostate")) != "Ready":
             created = parse_cloudstack_time(item.get("created"))
             age_hours = (now - created).total_seconds() / 3600 if created else None
             if age_hours is None or age_hours >= args.stalled_after_hours:
@@ -396,7 +420,9 @@ def reconcile_states(
                 )
 
         reason = None
-        if args.disable_eol:
+        if not matches_manifest and version in current_ready:
+            reason = "superseded by the manifest's rebuilt artifact for this version"
+        if reason is None and args.disable_eol:
             eol = index[version].get("eol")
             if isinstance(eol, str) and eol:
                 try:

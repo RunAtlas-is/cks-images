@@ -50,6 +50,11 @@ const SIGNING_FINGERPRINT =
 const CKS_MIN_CPU = Number(process.env.CKS_MIN_CPU ?? "2");
 const CKS_MIN_MEMORY = Number(process.env.CKS_MIN_MEMORY ?? "2048");
 const CKS_DIRECT_DOWNLOAD = /^true$/i.test(process.env.CKS_DIRECT_DOWNLOAD ?? "false");
+// CloudStack major.minor whose ISO contract the registry consumes. Only
+// artifacts carrying this format marker in their name are offered to the
+// CloudStack sync as manifest images; artifacts for other (or unmarked)
+// contracts stay listed in the HTML index but are never registered.
+const CLOUDSTACK_FORMAT = process.env.CLOUDSTACK_FORMAT ?? "4.22";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DIST = process.env.DIST_DIR ?? join(HERE, "dist");
@@ -75,6 +80,7 @@ type ParsedIso = {
   patch: number;
   version: string;
   minorKey: string;
+  formatTag: string | null;
   sourceArch: string;
   cloudstackArch: string;
   sortKey: number;
@@ -202,7 +208,7 @@ function formatTimestamp(d: Date): string {
   return `${iso.slice(0, 10)} ${iso.slice(11, 16)}`;
 }
 
-const isoNameRe = /^setup-v(\d+)\.(\d+)\.(\d+)-[^-]+-(amd64|arm64)(?:-(x86_64|aarch64))?\.iso$/;
+const isoNameRe = /^setup-v(\d+)\.(\d+)\.(\d+)-[^-]+(?:-cs(\d+\.\d+))?-(amd64|arm64)(?:-(x86_64|aarch64))?\.iso$/;
 function cloudstackArch(sourceArch: string, explicitArch?: string): string {
   if (explicitArch) return explicitArch;
   return sourceArch === "arm64" ? "aarch64" : "x86_64";
@@ -210,15 +216,16 @@ function cloudstackArch(sourceArch: string, explicitArch?: string): string {
 
 function parseIso(name: string): ParsedIso | null {
   const m = isoNameRe.exec(name);
-  if (!m || !m[1] || !m[2] || !m[3] || !m[4]) return null;
+  if (!m || !m[1] || !m[2] || !m[3] || !m[5]) return null;
   const major = Number(m[1]), minor = Number(m[2]), patch = Number(m[3]);
-  const sourceArch = m[4];
+  const sourceArch = m[5];
   return {
     major, minor, patch,
     version: `${major}.${minor}.${patch}`,
     minorKey: `${major}.${minor}`,
+    formatTag: m[4] ?? null,
     sourceArch,
-    cloudstackArch: cloudstackArch(sourceArch, m[5]),
+    cloudstackArch: cloudstackArch(sourceArch, m[6]),
     sortKey: major * 1_000_000 + minor * 1_000 + patch,
   };
 }
@@ -244,6 +251,7 @@ function buildManifest(args: {
   const images = entries
     .map((entry) => ({ entry, name: stripPrefix(entry.key), iso: parseIso(stripPrefix(entry.key)) }))
     .filter((item): item is { entry: Entry; name: string; iso: ParsedIso } => item.iso != null)
+    .filter(({ iso }) => iso.formatTag === CLOUDSTACK_FORMAT)
     .map(({ entry, name, iso }) => {
       const checksum = checksumSetByMinor.get(iso.minorKey);
       return {
@@ -265,6 +273,7 @@ function buildManifest(args: {
           name: `v${iso.version}`,
           semanticVersion: iso.version,
           arch: iso.cloudstackArch,
+          format: iso.formatTag,
           minCpuNumber: CKS_MIN_CPU,
           minMemory: CKS_MIN_MEMORY,
           directDownload: CKS_DIRECT_DOWNLOAD,
@@ -276,6 +285,7 @@ function buildManifest(args: {
   return {
     schemaVersion: 1,
     generatedAt: new Date().toISOString(),
+    cloudstackFormat: CLOUDSTACK_FORMAT,
     artifactBaseUrl: ARTIFACT_BASE_URL.replace(/\/+$/, ""),
     siteBaseUrl: SITE_BASE_URL.replace(/\/+$/, ""),
     storage: {

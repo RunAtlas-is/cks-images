@@ -12,6 +12,30 @@ version. See the upstream CloudStack Kubernetes Service docs:
 
 <https://docs.cloudstack.apache.org/en/latest/plugins/cloudstack-kubernetes-service.html#kubernetes-supported-versions>
 
+## CloudStack Release Contract
+
+The ISO layout is an interface consumed by the deployed CloudStack release:
+its node bootstrap applies specific files from the mounted ISO
+(`dashboard.yaml`, `network.yaml`, binaries), and the management server then
+waits for the workloads those files create. An ISO built with a build script
+from a different CloudStack release can bootstrap a working control plane and
+still fail cluster creation, because the file the deployed release applies is
+absent.
+
+The build therefore pins everything to `CLOUDSTACK_VERSION` (repository
+variable, workflow default): the upstream `create-kubernetes-binaries-iso.sh`
+is fetched at that release tag, the build asserts the fetched script's
+argument contract and the produced ISO's content before publishing, and
+artifact names carry the CloudStack major.minor as a format marker
+(`setup-v<k8s>-calico-cs<major.minor>-<arch>-<machine>.iso`). The manifest
+offers only images whose marker matches its `cloudstackFormat`; unmarked or
+foreign-format artifacts remain listed for download but are never registered.
+
+Upgrading CloudStack across a format boundary means bumping
+`CLOUDSTACK_VERSION`, letting CI rebuild the active matrix under the new
+marker, and letting the sync register the rebuilt artifacts and retire the
+drifted ones. Nothing else needs coordinating.
+
 ## Registration Policy
 
 Use one CloudStack supported version per Kubernetes patch version.
@@ -39,9 +63,15 @@ appears in the manifest for the selected arch; operator-registered custom
 versions are never touched:
 
 - **Register**: the newest patch of every in-support minor
-  (`--latest-per-minor`) that is not yet registered. The ISO downloads through
-  the zone's secondary storage VM and the version becomes usable when the ISO
-  reaches `Ready`.
+  (`--latest-per-minor`) whose manifest artifact is not yet registered. A
+  registered entry counts only when it points at the manifest's ISO URL; a
+  same-version entry pointing at another artifact is a stale build. The ISO
+  downloads through the zone's secondary storage VM and the version becomes
+  usable when the ISO reaches `Ready`.
+- **Disable drifted**: an entry whose ISO URL differs from the manifest's
+  artifact for the same version is disabled as soon as the manifest's own
+  artifact is `Ready`, so a rebuild (for example after a CloudStack format
+  bump) replaces the stale registration without a gap.
 - **Disable superseded** (`--disable-superseded`): once a newer patch of the
   same minor has a `Ready` ISO, older enabled patches of that minor are
   disabled. The replacement being `Ready` is a precondition, so tenant capacity

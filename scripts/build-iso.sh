@@ -3,15 +3,22 @@
 # upload it to an S3-compatible bucket.
 #
 # Wraps upstream create-kubernetes-binaries-iso.sh from apache/cloudstack.
-# Fetches the upstream script at the commit pinned in UPSTREAM_REF so builds
-# are reproducible; bump the pin after reviewing the upstream diff.
+# The ISO layout is an interface consumed by the CloudStack release that
+# deploys it: the release's node bootstrap applies specific files from the
+# mounted ISO (dashboard.yaml, network.yaml, ...), so the build script must
+# come from that release's tag, not from an arbitrary newer commit. The
+# script is therefore fetched at the CLOUDSTACK_VERSION release tag, and the
+# produced ISO name carries the CloudStack major.minor as a format marker
+# (e.g. -cs4.22-) so artifacts for different release contracts can coexist.
 #
 # Required env:
 #   K8S_VERSION           e.g. 1.33.1 (no leading v)
 #   CNI_VERSION           e.g. 1.9.1
 #   CRICTL_VERSION        e.g. 1.36.0
 #   CNI_YAML_URL          e.g. Calico manifest URL
-#   HEADLAMP_VERSION      e.g. 0.43.0
+#   DASHBOARD_YAML_URL    kubernetes-dashboard manifest the ISO embeds,
+#                         e.g. .../dashboard/v2.7.0/aio/deploy/recommended.yaml
+#   CLOUDSTACK_VERSION    deployed CloudStack release, e.g. 4.22.1.0
 #
 # Optional env:
 #   ARCH                  amd64 (default) | arm64
@@ -21,6 +28,8 @@
 #   S3_ENDPOINT_URL       e.g. https://s3.runatlas.is
 #   S3_PREFIX             key prefix inside bucket (default: cks/)
 #   GPG_PASSPHRASE        optional passphrase for SIGNING_KEY in CI
+#   UPSTREAM_REF          override the fetched apache/cloudstack ref; defaults
+#                         to the CLOUDSTACK_VERSION release tag
 
 set -euo pipefail
 
@@ -28,34 +37,47 @@ set -euo pipefail
 : "${CNI_VERSION:?CNI_VERSION is required}"
 : "${CRICTL_VERSION:?CRICTL_VERSION is required}"
 : "${CNI_YAML_URL:?CNI_YAML_URL is required}"
-: "${HEADLAMP_VERSION:?HEADLAMP_VERSION is required}"
+: "${DASHBOARD_YAML_URL:?DASHBOARD_YAML_URL is required}"
+: "${CLOUDSTACK_VERSION:?CLOUDSTACK_VERSION is required}"
 
 ARCH="${ARCH:-amd64}"
 OUTPUT_DIR="${OUTPUT_DIR:-./output}"
 S3_PREFIX="${S3_PREFIX:-cks/}"
-# Pin to a specific apache/cloudstack commit so the build is reproducible
-# and a breaking change upstream (positional-arg re-order, etc.) can't
-# land silently. Bump this SHA after reviewing the upstream diff.
-UPSTREAM_REF="${UPSTREAM_REF:-18075ae4a96be1b545c8d8a5a73004911c6079e7}"
+UPSTREAM_REF="${UPSTREAM_REF:-refs/tags/${CLOUDSTACK_VERSION}}"
 UPSTREAM_URL="https://raw.githubusercontent.com/apache/cloudstack/${UPSTREAM_REF}/scripts/util/create-kubernetes-binaries-iso.sh"
-BUILD_NAME="setup-v${K8S_VERSION}-calico-${ARCH}"
+# Format marker: the CloudStack major.minor whose contract this ISO satisfies.
+CS_FORMAT="$(cut -d. -f1-2 <<<"${CLOUDSTACK_VERSION}")"
+BUILD_NAME="setup-v${K8S_VERSION}-calico-cs${CS_FORMAT}-${ARCH}"
 
 mkdir -p "$OUTPUT_DIR"
 workdir="$(mktemp -d)"
 trap 'rm -rf "$workdir"' EXIT
 
-echo ">> Fetching upstream build script"
+echo ">> Fetching upstream build script at ${UPSTREAM_REF}"
 curl -fsSL "$UPSTREAM_URL" -o "$workdir/create-kubernetes-binaries-iso.sh"
 chmod +x "$workdir/create-kubernetes-binaries-iso.sh"
 
-echo ">> Building ISO for k8s=$K8S_VERSION arch=$ARCH"
+# Interface assertion: the released script takes a dashboard manifest URL as
+# its sixth argument and bundles it as dashboard.yaml, which the release's
+# node bootstrap applies. Upstream main has already replaced this with a
+# Headlamp version argument, so a wrong ref would silently build an ISO the
+# deployed release cannot finish provisioning. Refuse anything that does not
+# present the classic contract; a CloudStack upgrade that changes the
+# contract must update this script and DASHBOARD_YAML_URL deliberately.
+if ! grep -q 'DASHBOARD_YAML_CONFIG' "$workdir/create-kubernetes-binaries-iso.sh"; then
+  echo "!! Upstream script at ${UPSTREAM_REF} does not take DASHBOARD_YAML_CONFIG;" >&2
+  echo "!! its ISO layout does not match the CloudStack ${CLOUDSTACK_VERSION} contract." >&2
+  exit 1
+fi
+
+echo ">> Building ISO for k8s=$K8S_VERSION arch=$ARCH cloudstack=$CLOUDSTACK_VERSION"
 "$workdir/create-kubernetes-binaries-iso.sh" \
   "$OUTPUT_DIR" \
   "$K8S_VERSION" \
   "$CNI_VERSION" \
   "$CRICTL_VERSION" \
   "$CNI_YAML_URL" \
-  "$HEADLAMP_VERSION" \
+  "$DASHBOARD_YAML_URL" \
   "$BUILD_NAME" \
   "$ARCH" \
   ${ETCD_VERSION:+"$ETCD_VERSION"}
@@ -69,6 +91,19 @@ if [[ -z "$iso_path" || ! -f "$iso_path" ]]; then
   exit 1
 fi
 iso_name="$(basename "$iso_path")"
+
+# Content gate: assert the ISO carries every file the deploying CloudStack
+# release consumes before anything is signed or published. A missing entry
+# here is exactly the failure mode that otherwise only surfaces as a tenant
+# cluster stuck in Alert.
+echo ">> Validating ISO contents"
+listing="$(isoinfo -f -i "$iso_path")"
+for required in dashboard.yaml network.yaml kubeadm kubectl kubelet; do
+  if ! grep -qiE "(^|/)${required}" <<<"$listing"; then
+    echo "!! ${iso_name} is missing ${required}; refusing to publish" >&2
+    exit 1
+  fi
+done
 
 echo ">> Built $iso_path ($(du -h "$iso_path" | cut -f1))"
 sha256sum "$iso_path" > "${iso_path}.sha256"

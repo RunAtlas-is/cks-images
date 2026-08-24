@@ -40,7 +40,12 @@ env:
   SIGNING_FINGERPRINT: ${{ vars.GPG_SIGNING_FINGERPRINT || '4C2D72FDDEF77A5CC4A7D2C421CA4588DCB6991E' }}
   CNI_VERSION: ${{ vars.CNI_VERSION || '1.9.1' }}
   CRICTL_VERSION: ${{ vars.CRICTL_VERSION || '1.36.0' }}
-  HEADLAMP_VERSION: ${{ vars.HEADLAMP_VERSION || '0.43.0' }}
+  # The deployed CloudStack release. It pins the upstream ISO build script
+  # (fetched at this release tag), the format marker in artifact names, and
+  # which images the manifest offers to the registry sync. Bump it together
+  # with a CloudStack management upgrade, never independently.
+  CLOUDSTACK_VERSION: ${{ vars.CLOUDSTACK_VERSION || '4.22.1.0' }}
+  DASHBOARD_YAML_URL: ${{ vars.DASHBOARD_YAML_URL || 'https://raw.githubusercontent.com/kubernetes/dashboard/v2.7.0/aio/deploy/recommended.yaml' }}
   CNI_YAML_URL: ${{ vars.CNI_YAML_URL || 'https://raw.githubusercontent.com/projectcalico/calico/v3.32.1/manifests/calico.yaml' }}
 
 jobs:
@@ -150,8 +155,9 @@ jobs:
           if [[ -n "$prefix" && "$prefix" != */ ]]; then
             prefix="${prefix}/"
           fi
+          cs_format="$(cut -d. -f1-2 <<<"${CLOUDSTACK_VERSION}")"
           echo "k8s_version=$latest" >> "$GITHUB_OUTPUT"
-          echo "object_key=${prefix}setup-v${latest}-calico-amd64-x86_64.iso" >> "$GITHUB_OUTPUT"
+          echo "object_key=${prefix}setup-v${latest}-calico-cs${cs_format}-amd64-x86_64.iso" >> "$GITHUB_OUTPUT"
 
       - name: Check existing object
         id: existing
@@ -308,6 +314,7 @@ jobs:
       - name: Build Pages site
         run: |
           set -euo pipefail
+          export CLOUDSTACK_FORMAT="$(cut -d. -f1-2 <<<"${CLOUDSTACK_VERSION}")"
           cd index
           bun install --frozen-lockfile
           bun run build
