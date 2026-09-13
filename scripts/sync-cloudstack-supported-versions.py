@@ -31,9 +31,14 @@ except ImportError:  # pragma: no cover - exercised by shell validation.
 
 DEFAULT_MANIFEST_URL = "https://runatlas-is.github.io/cks-images/manifest.json"
 
-# Atlas Cloud artifact signing key. The pin lives here, outside the manifest,
-# so a tampered manifest cannot supply its own key and fingerprint pair.
-DEFAULT_SIGNING_FINGERPRINT = "4C2D72FDDEF77A5CC4A7D2C421CA4588DCB6991E"
+# Atlas Cloud artifact signing keys, current first. The pin lives here, outside
+# the manifest, so a tampered manifest cannot supply its own key and fingerprint
+# pair. The previous key stays pinned while artifacts signed before the rotation
+# are still published; see docs/operations.md.
+DEFAULT_SIGNING_FINGERPRINTS = (
+    "4BB5C9F558FBD4A0981F07EF1A2D98FB5D036FC3",
+    "4C2D72FDDEF77A5CC4A7D2C421CA4588DCB6991E",
+)
 
 # Hosts this script is allowed to fetch from. The manifest lives on GitHub Pages
 # (runatlas-is.github.io); the signing key defaults to the same site; checksum
@@ -204,25 +209,42 @@ def parse_checksum_file(content: bytes) -> dict[str, str]:
     return checksums
 
 
-def import_and_check_key(gpg_home: Path, key_path: Path, expected_fingerprint: str) -> None:
-    subprocess.run(
-        ["gpg", "--batch", "--homedir", str(gpg_home), "--import", str(key_path)],
-        check=True,
-        stdout=subprocess.DEVNULL,
-    )
+def split_pins(raw: str) -> list[str]:
+    return [part.strip().upper().replace(" ", "") for part in re.split(r"[,\s]+", raw) if part.strip()]
+
+
+def import_and_check_keys(gpg_home: Path, key_paths: list[Path], pinned: list[str]) -> None:
+    for key_path in key_paths:
+        subprocess.run(
+            ["gpg", "--batch", "--homedir", str(gpg_home), "--import", str(key_path)],
+            check=True,
+            stdout=subprocess.DEVNULL,
+        )
     result = subprocess.run(
         ["gpg", "--batch", "--homedir", str(gpg_home), "--with-colons", "--fingerprint"],
         check=True,
         capture_output=True,
         text=True,
     )
-    fingerprints = {
-        line.split(":")[9].upper()
-        for line in result.stdout.splitlines()
-        if line.startswith("fpr:")
-    }
-    if expected_fingerprint.upper().replace(" ", "") not in fingerprints:
-        sys.exit("Signing key fingerprint does not match the pinned fingerprint")
+    # Only a primary key's fingerprint can be pinned: the fpr record that
+    # follows a pub record. Subkey fingerprints follow sub records and are not
+    # pins, so an attacker cannot satisfy the pin with a crafted subkey.
+    primaries: set[str] = set()
+    expect_primary = False
+    for line in result.stdout.splitlines():
+        record = line.split(":")[0]
+        if record == "pub":
+            expect_primary = True
+        elif record == "fpr" and expect_primary:
+            primaries.add(line.split(":")[9].upper())
+            expect_primary = False
+        elif record in {"sub", "uid"}:
+            expect_primary = False
+    unpinned = primaries - set(pinned)
+    if unpinned:
+        sys.exit(f"Signing keyring holds an unpinned key: {', '.join(sorted(unpinned))}")
+    if not primaries & set(pinned):
+        sys.exit("Signing key fingerprint does not match a pinned fingerprint")
 
 
 def verify_signature(gpg_home: Path, signature: Path, payload: Path) -> None:
@@ -233,18 +255,34 @@ def verify_signature(gpg_home: Path, signature: Path, payload: Path) -> None:
     )
 
 
+def manifest_key_urls(manifest: dict[str, Any], args: argparse.Namespace) -> list[str]:
+    if args.key_url:
+        return list(args.key_url)
+    urls: list[str] = []
+    keys = manifest.get("signingKeys")
+    if isinstance(keys, list):
+        urls = [str(key["url"]) for key in keys if isinstance(key, dict) and key.get("url")]
+    if not urls:
+        signing = manifest.get("signingKey") if isinstance(manifest.get("signingKey"), dict) else {}
+        if signing.get("url"):
+            urls = [str(signing["url"])]
+    return list(dict.fromkeys(urls))
+
+
 def verify_images(manifest: dict[str, Any], images: list[dict[str, Any]], args: argparse.Namespace) -> None:
     if args.skip_gpg_verify:
         return
     if not shutil.which("gpg"):
         sys.exit("gpg is required for checksum verification")
 
-    signing = manifest.get("signingKey") if isinstance(manifest.get("signingKey"), dict) else {}
-    key_url = args.key_url or signing.get("url")
-    # The fingerprint deliberately never falls back to the manifest: a
-    # manifest-supplied pin would make verification self-referential.
-    fingerprint = args.signing_fingerprint
-    if not key_url or not fingerprint:
+    key_urls = manifest_key_urls(manifest, args)
+    # The fingerprints deliberately never fall back to the manifest: a
+    # manifest-supplied pin would make verification self-referential. Every key
+    # the manifest offers must match one of them, and a checksum set signed by
+    # any pinned key verifies, so a set signed before a key rotation still
+    # passes while it is published.
+    pinned = split_pins(args.signing_fingerprint)
+    if not key_urls or not pinned:
         sys.exit("Signing key URL and pinned fingerprint are required")
 
     cache_root = Path(os.environ.get("CKS_SYNC_TMPDIR", ".cache"))
@@ -253,9 +291,12 @@ def verify_images(manifest: dict[str, Any], images: list[dict[str, Any]], args: 
         temp = Path(temp_name)
         gpg_home = temp / "gnupg"
         gpg_home.mkdir(mode=0o700)
-        key_path = temp / "signing-key.asc"
-        key_path.write_bytes(fetch_bytes(str(key_url)))
-        import_and_check_key(gpg_home, key_path, str(fingerprint))
+        key_paths = []
+        for index, key_url in enumerate(key_urls):
+            key_path = temp / f"signing-key-{index}.asc"
+            key_path.write_bytes(fetch_bytes(str(key_url)))
+            key_paths.append(key_path)
+        import_and_check_keys(gpg_home, key_paths, pinned)
 
         checksum_cache: dict[tuple[str, str], dict[str, str]] = {}
         for image in images:
@@ -515,10 +556,15 @@ def main() -> None:
         help="Age in hours before a non-Ready ISO counts as stalled.",
     )
     parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--key-url", help="Override manifest signing key URL.")
+    parser.add_argument(
+        "--key-url",
+        action="append",
+        help="Override the manifest signing key URLs. Repeatable.",
+    )
     parser.add_argument(
         "--signing-fingerprint",
-        default=os.environ.get("GPG_SIGNING_FINGERPRINT") or DEFAULT_SIGNING_FINGERPRINT,
+        default=os.environ.get("GPG_SIGNING_FINGERPRINT") or ",".join(DEFAULT_SIGNING_FINGERPRINTS),
+        help="Pinned primary key fingerprints, separated by commas or spaces.",
     )
     parser.add_argument("--skip-gpg-verify", action="store_true", help="Skip signed checksum verification.")
     args = parser.parse_args()

@@ -11,8 +11,11 @@
 //   S3_PREFIX                 object prefix for CKS artifacts (default: cks/)
 //   ARTIFACT_BASE_URL         public base URL for objects in BUCKET_NAME
 //   SITE_BASE_URL             public base URL for this GitHub Pages site
-//   KEY_URL                   public URL for the artifact signing key
-//   SIGNING_FINGERPRINT       Atlas artifact key fingerprint (display only)
+//   KEY_URL                   public URL for the current artifact signing key
+//   SIGNING_FINGERPRINT       current Atlas artifact key fingerprint (display only)
+//   PREVIOUS_KEY_URL          public URL for the previous artifact signing key
+//   PREVIOUS_SIGNING_FINGERPRINT
+//                             previous Atlas artifact key fingerprint (display only)
 //   CKS_MIN_CPU               CloudStack mincpunumber in manifest (default: 2)
 //   CKS_MIN_MEMORY            CloudStack minmemory in manifest (default: 2048)
 //   CKS_DIRECT_DOWNLOAD       CloudStack directdownload in manifest (default: false)
@@ -44,9 +47,16 @@ const ARTIFACT_BASE_URL =
   process.env.ARTIFACT_BASE_URL ?? "https://s3.runatlas.is/atlas-static-assets";
 const SITE_BASE_URL =
   process.env.SITE_BASE_URL ?? "https://runatlas-is.github.io/cks-images";
-const KEY_PATH = "keys/atlas-cloud-artifact-signing.asc";
+// Both artifact signing keys are published: the current one signs new
+// artifacts, the previous one still verifies everything signed before the
+// rotation. The transition statement is signed by both. See docs/operations.md.
+const KEY_PATH = "keys/atlas-cloud-artifact-signing-2026.asc";
+const PREVIOUS_KEY_PATH = "keys/atlas-cloud-artifact-signing.asc";
+const TRANSITION_PATH = "keys/atlas-artifact-signing-key-transition-2026.txt.asc";
 const SIGNING_FINGERPRINT =
-  process.env.SIGNING_FINGERPRINT ?? "4C2D72FDDEF77A5CC4A7D2C421CA4588DCB6991E";
+  process.env.SIGNING_FINGERPRINT ?? "4BB5C9F558FBD4A0981F07EF1A2D98FB5D036FC3";
+const PREVIOUS_SIGNING_FINGERPRINT =
+  process.env.PREVIOUS_SIGNING_FINGERPRINT ?? "4C2D72FDDEF77A5CC4A7D2C421CA4588DCB6991E";
 const CKS_MIN_CPU = Number(process.env.CKS_MIN_CPU ?? "2");
 const CKS_MIN_MEMORY = Number(process.env.CKS_MIN_MEMORY ?? "2048");
 const CKS_DIRECT_DOWNLOAD = /^true$/i.test(process.env.CKS_DIRECT_DOWNLOAD ?? "false");
@@ -59,7 +69,7 @@ const CLOUDSTACK_FORMAT = process.env.CLOUDSTACK_FORMAT ?? "4.22";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DIST = process.env.DIST_DIR ?? join(HERE, "dist");
 const BRANDING = join(HERE, "assets");
-const KEY_SOURCE = join(HERE, "..", KEY_PATH);
+const PUBLISHED_KEY_FILES = [KEY_PATH, PREVIOUS_KEY_PATH, TRANSITION_PATH];
 
 const s3 = new S3Client({
   region: "us-east-1",
@@ -202,6 +212,9 @@ function artifactHref(key: string): string {
 }
 
 const KEY_URL = process.env.KEY_URL ?? joinUrl(SITE_BASE_URL, KEY_PATH);
+const PREVIOUS_KEY_URL =
+  process.env.PREVIOUS_KEY_URL ?? joinUrl(SITE_BASE_URL, PREVIOUS_KEY_PATH);
+const TRANSITION_URL = joinUrl(SITE_BASE_URL, TRANSITION_PATH);
 
 function formatTimestamp(d: Date): string {
   const iso = d.toISOString();
@@ -292,10 +305,25 @@ function buildManifest(args: {
       bucket: BUCKET,
       prefix: S3_PREFIX,
     },
+    // signingKey names the key that signs new artifacts; signingKeys carries
+    // every key a consumer needs to verify what is currently published.
     signingKey: {
       url: KEY_URL,
       fingerprint: SIGNING_FINGERPRINT.toUpperCase(),
     },
+    signingKeys: [
+      {
+        url: KEY_URL,
+        fingerprint: SIGNING_FINGERPRINT.toUpperCase(),
+        status: "current",
+      },
+      {
+        url: PREVIOUS_KEY_URL,
+        fingerprint: PREVIOUS_SIGNING_FINGERPRINT.toUpperCase(),
+        status: "previous",
+      },
+    ],
+    keyTransitionUrl: TRANSITION_URL,
     checksumSets: minorsWithChecksum.map((minor) => ({
       minor,
       url: artifactHref(objectKey(`CHECKSUM-${minor}`)),
@@ -439,7 +467,7 @@ function renderHtml(args: {
           )
           .join(" &middot; ")
       : "<em>no checksum files yet</em>"}
-<pre>curl -sO ${escape(KEY_URL)} && gpg --import atlas-cloud-artifact-signing.asc
+<pre>curl -sO ${escape(KEY_URL)} && gpg --import atlas-cloud-artifact-signing-2026.asc
 curl -sO ${escape(artifactHref(objectKey("CHECKSUM-1.33")))}
 curl -sO ${escape(artifactHref(objectKey("CHECKSUM-1.33.asc")))}
 gpg --verify CHECKSUM-1.33.asc CHECKSUM-1.33
@@ -448,7 +476,13 @@ sha256sum --check --ignore-missing CHECKSUM-1.33</pre>
   <div class="fpr">
     <a href="${escape(KEY_URL)}">KEY.asc</a><br>
     Atlas Cloud signing<br>
-    ${formatFingerprint(SIGNING_FINGERPRINT)}
+    ${formatFingerprint(SIGNING_FINGERPRINT)}<br>
+    <br>
+    <a href="${escape(PREVIOUS_KEY_URL)}">KEY-previous.asc</a><br>
+    valid for artifacts signed before 2026-09-13<br>
+    ${formatFingerprint(PREVIOUS_SIGNING_FINGERPRINT)}<br>
+    <br>
+    <a href="${escape(TRANSITION_URL)}">key transition statement</a>
   </div>
 </div>
 <div class="table-wrap">
@@ -647,10 +681,9 @@ async function main() {
       writeFileSync(join(target, asset), readFileSync(join(BRANDING, asset)));
     }
     mkdirSync(join(target, "keys"), { recursive: true });
-    writeFileSync(
-      join(target, KEY_PATH),
-      readFileSync(KEY_SOURCE),
-    );
+    for (const keyFile of PUBLISHED_KEY_FILES) {
+      writeFileSync(join(target, keyFile), readFileSync(join(HERE, "..", keyFile)));
+    }
   }
 
   const isoCount = entries.filter((e) => parseIso(stripPrefix(e.key))).length;

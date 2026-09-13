@@ -37,7 +37,10 @@ env:
   SITE_BASE_URL: ${{ vars.SITE_BASE_URL || 'https://runatlas-is.github.io/cks-images' }}
   DOCS_URL: ${{ vars.DOCS_URL || 'https://github.com/RunAtlas-is/cks-images/blob/main/docs/operations.md' }}
   SIGNING_KEY: ${{ vars.GPG_SIGNING_KEY || 'artifacts@runatlas.is' }}
-  SIGNING_FINGERPRINT: ${{ vars.GPG_SIGNING_FINGERPRINT || '4C2D72FDDEF77A5CC4A7D2C421CA4588DCB6991E' }}
+  # The current key signs; both keys verify, so artifacts signed before the
+  # rotation keep their provenance without being re-signed (docs/operations.md).
+  SIGNING_FINGERPRINT: ${{ vars.GPG_SIGNING_FINGERPRINT_2026 || '4BB5C9F558FBD4A0981F07EF1A2D98FB5D036FC3' }}
+  TRUSTED_FINGERPRINTS: ${{ vars.GPG_TRUSTED_FINGERPRINTS || '4BB5C9F558FBD4A0981F07EF1A2D98FB5D036FC3 4C2D72FDDEF77A5CC4A7D2C421CA4588DCB6991E' }}
   CNI_VERSION: ${{ vars.CNI_VERSION || '1.9.1' }}
   CRICTL_VERSION: ${{ vars.CRICTL_VERSION || '1.36.0' }}
   # The deployed CloudStack release. It pins the upstream ISO build script
@@ -89,7 +92,7 @@ jobs:
     env:
       AWS_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID || secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY || secrets.AWS_SECRET_ACCESS_KEY }}
-      GPG_PRIVATE_KEY_B64: ${{ secrets.GPG_PRIVATE_KEY_B64 }}
+      GPG_PRIVATE_KEY_B64: ${{ secrets.GPG_PRIVATE_KEY_B64_2026 }}
       GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
       FORCE_REBUILD: ${{ github.event.inputs.force_rebuild || 'false' }}
     steps:
@@ -100,7 +103,7 @@ jobs:
           set -euo pipefail
           test -n "${AWS_ACCESS_KEY_ID}" || { echo "S3_ACCESS_KEY_ID is missing" >&2; exit 1; }
           test -n "${AWS_SECRET_ACCESS_KEY}" || { echo "S3_SECRET_ACCESS_KEY is missing" >&2; exit 1; }
-          test -n "${GPG_PRIVATE_KEY_B64}" || { echo "GPG_PRIVATE_KEY_B64 is missing" >&2; exit 1; }
+          test -n "${GPG_PRIVATE_KEY_B64}" || { echo "GPG_PRIVATE_KEY_B64_2026 is missing" >&2; exit 1; }
 
       - name: Install prerequisites
         run: |
@@ -230,7 +233,7 @@ jobs:
     env:
       AWS_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID || secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY || secrets.AWS_SECRET_ACCESS_KEY }}
-      GPG_PRIVATE_KEY_B64: ${{ secrets.GPG_PRIVATE_KEY_B64 }}
+      GPG_PRIVATE_KEY_B64: ${{ secrets.GPG_PRIVATE_KEY_B64_2026 }}
       GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -249,10 +252,14 @@ jobs:
           set -euo pipefail
           test -n "${AWS_ACCESS_KEY_ID}" || { echo "S3_ACCESS_KEY_ID is missing" >&2; exit 1; }
           test -n "${AWS_SECRET_ACCESS_KEY}" || { echo "S3_SECRET_ACCESS_KEY is missing" >&2; exit 1; }
-          test -n "${GPG_PRIVATE_KEY_B64}" || { echo "GPG_PRIVATE_KEY_B64 is missing" >&2; exit 1; }
+          test -n "${GPG_PRIVATE_KEY_B64}" || { echo "GPG_PRIVATE_KEY_B64_2026 is missing" >&2; exit 1; }
           export GNUPGHOME="${RUNNER_TEMP}/gnupg"
           mkdir -m 700 -p "$GNUPGHOME"
           printf '%s' "${GPG_PRIVATE_KEY_B64}" | base64 -d | gpg --batch --import
+          # Verifying already-published signatures needs the public half of
+          # every trusted key, including the previous one.
+          gpg --batch --import keys/atlas-cloud-artifact-signing.asc \
+                               keys/atlas-cloud-artifact-signing-2026.asc
           echo "GNUPGHOME=$GNUPGHOME" >> "$GITHUB_ENV"
 
       - name: Download built ISO digests
@@ -274,13 +281,21 @@ jobs:
           fi
           BUILT_DIGESTS_FILE="$merged" ./scripts/sign-artifacts.sh
 
-      - name: Publish signing key to object storage
+      - name: Publish signing keys to object storage
         run: |
           set -euo pipefail
+          for key in keys/atlas-cloud-artifact-signing.asc \
+                     keys/atlas-cloud-artifact-signing-2026.asc; do
+            aws --endpoint-url "${AWS_ENDPOINT_URL}" s3 cp \
+              "$key" "s3://${BUCKET_NAME}/${key}" \
+              --content-type "application/pgp-keys" \
+              --cache-control "max-age=3600" \
+              --only-show-errors
+          done
           aws --endpoint-url "${AWS_ENDPOINT_URL}" s3 cp \
-            keys/atlas-cloud-artifact-signing.asc \
-            "s3://${BUCKET_NAME}/keys/atlas-cloud-artifact-signing.asc" \
-            --content-type "application/pgp-keys" \
+            keys/atlas-artifact-signing-key-transition-2026.txt.asc \
+            "s3://${BUCKET_NAME}/keys/atlas-artifact-signing-key-transition-2026.txt.asc" \
+            --content-type "text/plain; charset=utf-8" \
             --cache-control "max-age=3600" \
             --only-show-errors
 
@@ -344,7 +359,7 @@ jobs:
       CKS_MIN_CPU: ${{ vars.CKS_MIN_CPU || '2' }}
       CKS_MIN_MEMORY: ${{ vars.CKS_MIN_MEMORY || '2048' }}
       CKS_DIRECT_DOWNLOAD: ${{ vars.CKS_DIRECT_DOWNLOAD || 'false' }}
-      GPG_SIGNING_FINGERPRINT: ${{ vars.GPG_SIGNING_FINGERPRINT || '4C2D72FDDEF77A5CC4A7D2C421CA4588DCB6991E' }}
+      GPG_SIGNING_FINGERPRINT: ${{ vars.GPG_TRUSTED_FINGERPRINTS || '4BB5C9F558FBD4A0981F07EF1A2D98FB5D036FC3,4C2D72FDDEF77A5CC4A7D2C421CA4588DCB6991E' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
