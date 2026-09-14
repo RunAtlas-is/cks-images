@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
-# Sign CKS ISO objects under the artifact prefix with the artifact key
-# (ed25519, fingerprint 4C2D72FDDEF77A5CC4A7D2C421CA4588DCB6991E), and publish
+# Sign CKS ISO objects under the artifact prefix with the current artifact key
+# (ed25519, fingerprint 4BB5C9F558FBD4A0981F07EF1A2D98FB5D036FC3), and publish
 # one CHECKSUM-<minor> file per Kubernetes minor version (1.33, 1.34, ...)
 # with a detached .asc signature so the per-minor sets can scale without a
 # single unbounded CHECKSUM.
+#
+# Signatures are produced by SIGNING_FINGERPRINT alone, but existing signatures
+# verify against any key in TRUSTED_FINGERPRINTS, which also carries the
+# previous artifact key. Artifacts signed before the rotation therefore keep
+# their provenance without being re-signed. Key list and rotation state:
+# docs/operations.md.
 #
 # Provenance gate: the bucket prefix is shared and writable by more identities
 # than this pipeline, so presence in the bucket is not proof an object came
@@ -12,9 +18,9 @@
 #   1. the current run's build manifest (BUILT_DIGESTS_FILE, "sha256  filename"
 #      lines emitted by the build job for ISOs it built and uploaded),
 #   2. an entry in the already-published CHECKSUM-<minor> whose detached
-#      signature verifies against SIGNING_FINGERPRINT,
+#      signature verifies against one of TRUSTED_FINGERPRINTS,
 #   3. for an ISO that already has a .asc sibling but no digest record, the
-#      downloaded ISO verifying against that signature with the pinned key.
+#      downloaded ISO verifying against that signature with a trusted key.
 # Anything else is an unexpected object: it is skipped, reported loudly, and
 # fails the run (exit 3) after the trusted work completes. A trusted ISO whose
 # bucket content or .sha256 sibling contradicts the trusted digest fails the
@@ -30,8 +36,11 @@
 #   S3_PREFIX            key prefix inside bucket (default: cks/)
 #   SIGNING_KEY          fingerprint or uid of the key to use
 #                        (default: artifacts@runatlas.is)
-#   SIGNING_FINGERPRINT  pinned fingerprint used to verify existing signatures
-#                        (default: the Atlas artifact key fingerprint above)
+#   SIGNING_FINGERPRINT  pinned fingerprint of the key that signs this run
+#                        (default: the current Atlas artifact key above)
+#   TRUSTED_FINGERPRINTS pinned fingerprints accepted when verifying an
+#                        existing signature, separated by spaces or commas
+#                        (default: the current and previous artifact keys)
 #   BUILT_DIGESTS_FILE   manifest of ISOs built by the current run
 #   GNUPGHOME            keyring location (default: $HOME/.gnupg-atlas)
 #   GPG_PASSPHRASE       optional passphrase for SIGNING_KEY in CI
@@ -44,9 +53,12 @@ set -euo pipefail
 : "${BUCKET_NAME:?}"
 
 SIGNING_KEY="${SIGNING_KEY:-artifacts@runatlas.is}"
-SIGNING_FINGERPRINT="${SIGNING_FINGERPRINT:-4C2D72FDDEF77A5CC4A7D2C421CA4588DCB6991E}"
+SIGNING_FINGERPRINT="${SIGNING_FINGERPRINT:-4BB5C9F558FBD4A0981F07EF1A2D98FB5D036FC3}"
 SIGNING_FINGERPRINT="${SIGNING_FINGERPRINT//[[:space:]]/}"
 SIGNING_FINGERPRINT="${SIGNING_FINGERPRINT^^}"
+TRUSTED_FINGERPRINTS="${TRUSTED_FINGERPRINTS:-${SIGNING_FINGERPRINT} 4C2D72FDDEF77A5CC4A7D2C421CA4588DCB6991E}"
+read -r -a trusted_fingerprints <<< "${TRUSTED_FINGERPRINTS//,/ }"
+trusted_fingerprints=("${trusted_fingerprints[@]^^}")
 S3_PREFIX="${S3_PREFIX:-cks/}"
 S3_PREFIX="${S3_PREFIX#/}"
 [[ -z "$S3_PREFIX" || "$S3_PREFIX" == */ ]] || S3_PREFIX="${S3_PREFIX}/"
@@ -75,14 +87,20 @@ gpg_detach_sign() {
   fi
 }
 
-# Verify detached signature $1 over payload $2 and require the pinned
-# fingerprint, so a valid signature from any other imported key is rejected.
+# Verify detached signature $1 over payload $2 and require one of the pinned
+# fingerprints, so a valid signature from any other imported key is rejected.
 # VALIDSIG carries the signing (sub)key fingerprint first and the primary key
-# fingerprint last, so accept the pin in either position.
+# fingerprint last, so accept a pin in either position.
 gpg_verify_pinned() {
-  local status
+  local status validsig fpr
   status=$(gpg --batch --status-fd 1 --verify "$1" "$2" 2>/dev/null) || return 1
-  grep "^\[GNUPG:\] VALIDSIG " <<<"$status" | grep -q "$SIGNING_FINGERPRINT"
+  validsig=$(grep "^\[GNUPG:\] VALIDSIG " <<<"$status") || return 1
+  for fpr in "${trusted_fingerprints[@]}"; do
+    if grep -q "$fpr" <<<"$validsig"; then
+      return 0
+    fi
+  done
+  return 1
 }
 
 tmp=$(mktemp -d)
@@ -137,7 +155,7 @@ for minor in "${!minor_isos[@]}"; do
   aws "${aws_opts[@]}" s3 cp "s3://${BUCKET_NAME}/${S3_PREFIX}${checksum}" "$tmp/prev-${checksum}" --only-show-errors
   aws "${aws_opts[@]}" s3 cp "s3://${BUCKET_NAME}/${S3_PREFIX}${checksum}.asc" "$tmp/prev-${checksum}.asc" --only-show-errors
   if ! gpg_verify_pinned "$tmp/prev-${checksum}.asc" "$tmp/prev-${checksum}"; then
-    echo "!! signature on existing ${checksum} does not verify against ${SIGNING_FINGERPRINT}" >&2
+    echo "!! signature on existing ${checksum} does not verify against ${TRUSTED_FINGERPRINTS}" >&2
     exit 2
   fi
   while read -r digest name; do
@@ -165,7 +183,7 @@ for iso in "${isos[@]}"; do
       trusted["$iso"]=$(sha256sum "$tmp/download/${iso}" | awk '{print $1}')
       echo "[provenance] recovered from existing signature: ${iso}"
     else
-      echo "!! ${iso} carries a .asc that does not verify against ${SIGNING_FINGERPRINT}" >&2
+      echo "!! ${iso} carries a .asc that does not verify against ${TRUSTED_FINGERPRINTS}" >&2
       unexpected+=("$iso")
     fi
     rm -f "$tmp/download/${iso}" "$tmp/download/${asc}"

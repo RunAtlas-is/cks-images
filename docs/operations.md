@@ -46,8 +46,8 @@ policy names, that means:
   checksum refresh, and catalog generation.
 - `s3:PutObject` on objects under the configured prefix for ISOs, SHA-256
   files, signatures, and per-minor checksum sets.
-- `s3:PutObject` on `keys/atlas-cloud-artifact-signing.asc` when the public
-  signing key is mirrored into object storage.
+- `s3:PutObject` on objects under `keys/` when the public signing keys and the
+  key transition statement are mirrored into object storage.
 - Multipart upload actions for large ISO writes: `s3:AbortMultipartUpload`,
   `s3:ListMultipartUploadParts`, and `s3:ListBucketMultipartUploads`.
 
@@ -102,12 +102,53 @@ covered by a signed checksum set.
 
 Required GitHub secrets:
 
-- `GPG_PRIVATE_KEY_B64`
+- `GPG_PRIVATE_KEY_B64_2026`
 - `GPG_PASSPHRASE` if the key is passphrase protected
 
-The public key is committed at `keys/atlas-cloud-artifact-signing.asc` and is
-included in the GitHub Pages artifact. CI also syncs it to object storage at
-`keys/atlas-cloud-artifact-signing.asc`.
+## Artifact Signing Keys
+
+Two keys are published. Both carry the user ID
+`Atlas Cloud (Artifact Signing) <artifacts@runatlas.is>`.
+
+| Fingerprint | File | State |
+| --- | --- | --- |
+| `4BB5C9F558FBD4A0981F07EF1A2D98FB5D036FC3` | `keys/atlas-cloud-artifact-signing-2026.asc` | current; signs new artifacts, expires 2028-09-12 |
+| `4C2D72FDDEF77A5CC4A7D2C421CA4588DCB6991E` | `keys/atlas-cloud-artifact-signing.asc` | valid for artifacts signed before 2026-09-13 |
+
+The current key is an ed25519 primary key that certifies only, with an ed25519
+signing subkey. `gpg --verify` reports the subkey fingerprint first and the
+primary fingerprint last, and the pipeline accepts a pin in either position.
+
+The previous key certifies the current key, so a consumer who already trusts
+the previous key can confirm the new one from the key material alone. The
+transition statement at `keys/atlas-artifact-signing-key-transition-2026.txt.asc`
+names both fingerprints and is signed by both keys:
+
+```bash
+gpg --import keys/atlas-cloud-artifact-signing.asc \
+             keys/atlas-cloud-artifact-signing-2026.asc
+gpg --verify keys/atlas-artifact-signing-key-transition-2026.txt.asc
+```
+
+Signing uses the current key alone, pinned by `SIGNING_FINGERPRINT`
+(repository variable `GPG_SIGNING_FINGERPRINT_2026`). Verification accepts any
+key in `TRUSTED_FINGERPRINTS` (repository variable
+`GPG_TRUSTED_FINGERPRINTS`), which carries both fingerprints, so ISO
+signatures and checksum sets written before the rotation stay valid and are
+never re-signed. The CloudStack sync pins the same pair through
+`GPG_SIGNING_FINGERPRINT`, which accepts a comma- or space-separated list, and
+refuses a keyring holding any key outside it.
+
+Both public keys and the transition statement are committed under `keys/`,
+included in the GitHub Pages artifact, and synced to object storage under the
+same names by the sign job.
+
+Retiring the previous key is a separate change: it drops the previous
+fingerprint from `TRUSTED_FINGERPRINTS` and from the CloudStack pin, removes
+the key file from `keys/` and from object storage, and publishes a revocation
+certificate. Every artifact signed with the previous key must be re-signed with
+the current key before that change lands, because its signature stops
+verifying.
 
 ## Local Builds
 

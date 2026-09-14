@@ -10,7 +10,11 @@ publishes the static catalog through GitHub Pages.
 - Catalog: <https://runatlas-is.github.io/cks-images/>
 - Manifest: <https://runatlas-is.github.io/cks-images/manifest.json>
 - Artifacts: <https://s3.runatlas.is/atlas-static-assets/cks/>
-- Public signing key: <https://runatlas-is.github.io/cks-images/keys/atlas-cloud-artifact-signing.asc>
+- Public signing key: <https://runatlas-is.github.io/cks-images/keys/atlas-cloud-artifact-signing-2026.asc>
+- Previous public signing key, still valid for artifacts signed before
+  2026-09-13: <https://runatlas-is.github.io/cks-images/keys/atlas-cloud-artifact-signing.asc>
+- Key transition statement, signed by both keys:
+  <https://runatlas-is.github.io/cks-images/keys/atlas-artifact-signing-key-transition-2026.txt.asc>
 
 ## Layout
 
@@ -20,7 +24,7 @@ publishes the static catalog through GitHub Pages.
 ├── .github/workflows/ci.yml           pull request and main validation
 ├── docs/                              operations and CloudStack integration
 ├── index/                             Bun static catalog generator
-├── keys/                              public artifact signing key
+├── keys/                              public artifact signing keys
 └── scripts/
     ├── build-iso.sh                   build and optionally upload one ISO
     ├── bulk-build.sh                  local helper for multiple versions
@@ -47,7 +51,7 @@ Repository secrets:
 
 - `S3_ACCESS_KEY_ID`
 - `S3_SECRET_ACCESS_KEY`
-- `GPG_PRIVATE_KEY_B64`
+- `GPG_PRIVATE_KEY_B64_2026`
 - `GPG_PASSPHRASE` when the key is passphrase protected
 
 Repository variables:
@@ -59,7 +63,8 @@ Repository variables:
 - `SITE_BASE_URL`, default `https://runatlas-is.github.io/cks-images`
 - `DOCS_URL`
 - `GPG_SIGNING_KEY`, default `artifacts@runatlas.is`
-- `GPG_SIGNING_FINGERPRINT`
+- `GPG_SIGNING_FINGERPRINT_2026`, the key that signs new artifacts
+- `GPG_TRUSTED_FINGERPRINTS`, every key whose existing signatures still verify
 
 Optional `cloudstack-registration` environment secrets for the manual
 `register_cloudstack` workflow input:
