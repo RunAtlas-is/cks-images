@@ -395,3 +395,35 @@ jobs:
             --disable-superseded \
             --disable-eol \
             --fail-on-stalled
+
+  notify-failure:
+    name: Notify Slack on failure
+    needs: [minors, build, sign, pages, cloudstack]
+    if: failure()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      # Same Slack channel this repository's Dependabot failure notifier
+      # already posts to.
+      SLACK_CHANNEL_ID: C09DCAPTS3H
+    steps:
+      - name: Notify Slack
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          TRIGGER: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          text="<!channel> ${GITHUB_WORKFLOW} failed in ${GITHUB_REPOSITORY} (triggered by ${TRIGGER}): <${RUN_URL}|view run>"
+          payload="$(jq -n --arg channel "${SLACK_CHANNEL_ID}" --arg text "${text}" \
+            '{channel: $channel, text: $text, unfurl_links: false, unfurl_media: false}')"
+          response="$(curl -fsS -X POST https://slack.com/api/chat.postMessage \
+            -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
+            -H "Content-Type: application/json; charset=utf-8" \
+            -d "${payload}")"
+          echo "${response}" | jq -e '.ok == true' >/dev/null || {
+            echo "::error::Slack chat.postMessage failed: $(echo "${response}" | jq -r '.error // "unknown error"')" >&2
+            exit 1
+          }
