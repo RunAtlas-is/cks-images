@@ -33,6 +33,15 @@ env:
   S3_BUCKET: ${{ vars.S3_BUCKET || 'atlas-static-assets' }}
   S3_ENDPOINT_URL: ${{ vars.S3_ENDPOINT_URL || 'https://s3.runatlas.is' }}
   S3_PREFIX: ${{ vars.S3_PREFIX || 'cks/' }}
+  # The Ceph RGW endpoint does not return the flexible-checksum response
+  # fields aws-cli defaults to since v2.23 (Jan 2025), which makes a
+  # multipart `aws s3 cp` of the (~970 MB) ISO crash s3transfer with
+  # "argument of type 'NoneType' is not a container or iterable" partway
+  # through the upload. Falling back to only-when-required checksums matches
+  # the documented escape hatch for third-party S3-compatible services:
+  # https://docs.aws.amazon.com/sdkref/latest/guide/feature-dataintegrity.html
+  AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+  AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
   ARTIFACT_BASE_URL: ${{ vars.ARTIFACT_BASE_URL || 'https://s3.runatlas.is/atlas-static-assets' }}
   SITE_BASE_URL: ${{ vars.SITE_BASE_URL || 'https://runatlas-is.github.io/cks-images' }}
   DOCS_URL: ${{ vars.DOCS_URL || 'https://github.com/RunAtlas-is/cks-images/blob/main/docs/operations.md' }}
