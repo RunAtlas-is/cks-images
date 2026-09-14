@@ -416,7 +416,7 @@ jobs:
           TRIGGER: ${{ github.event_name }}
         run: |
           set -euo pipefail
-          text="<!channel> ${GITHUB_WORKFLOW} failed in ${GITHUB_REPOSITORY} (triggered by ${TRIGGER}) — <${RUN_URL}|view run>"
+          text="<!channel> ${GITHUB_WORKFLOW} failed in ${GITHUB_REPOSITORY} (triggered by ${TRIGGER}): <${RUN_URL}|view run>"
           payload="$(jq -n --arg channel "${SLACK_CHANNEL_ID}" --arg text "${text}" \
             '{channel: $channel, text: $text, unfurl_links: false, unfurl_media: false}')"
           response="$(curl -fsS -X POST https://slack.com/api/chat.postMessage \
