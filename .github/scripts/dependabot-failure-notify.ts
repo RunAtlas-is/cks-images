@@ -139,6 +139,7 @@ function githubHeaders(token: string): HeadersInit {
 
 async function githubJson<T>(
   path: string,
+  operation: string,
   env: NotifyEnvironment,
   dependencies: NotifyDependencies,
 ): Promise<T> {
@@ -146,7 +147,7 @@ async function githubJson<T>(
   const response = await dependencies.fetch(`${baseUrl}${path}`, {
     headers: githubHeaders(env.GH_TOKEN),
   });
-  return responseJson<T>(response, `GitHub API request ${path}`);
+  return responseJson<T>(response, operation);
 }
 
 async function suppressDuplicate(
@@ -169,6 +170,7 @@ async function suppressDuplicate(
     });
     const response = await githubJson<WorkflowRunsResponse>(
       `/repos/${env.REPO}/actions/runs?${query}`,
+      "list workflow runs",
       env,
       dependencies,
     );
@@ -189,11 +191,12 @@ async function suppressDuplicate(
 
 async function optionalGithubJson<T>(
   path: string,
+  operation: string,
   env: NotifyEnvironment,
   dependencies: NotifyDependencies,
 ): Promise<T | undefined> {
   try {
-    return await githubJson<T>(path, env, dependencies);
+    return await githubJson<T>(path, operation, env, dependencies);
   } catch {
     return undefined;
   }
@@ -217,6 +220,7 @@ async function composeMessage(
     });
     const pulls = await optionalGithubJson<PullRequest[]>(
       `/repos/${env.REPO}/pulls?${query}`,
+      "list pull requests",
       env,
       dependencies,
     );
@@ -227,6 +231,7 @@ async function composeMessage(
   if (prNumber) {
     const pull = await optionalGithubJson<PullRequest>(
       `/repos/${env.REPO}/pulls/${prNumber}`,
+      "get pull request",
       env,
       dependencies,
     );
@@ -235,6 +240,7 @@ async function composeMessage(
 
   const jobs = await optionalGithubJson<JobsResponse>(
     `/repos/${env.REPO}/actions/runs/${requireValue(env, "RUN_ID")}/jobs?per_page=100`,
+    "list workflow jobs",
     env,
     dependencies,
   );
@@ -285,7 +291,7 @@ async function postToSlack(
       `Slack chat.postMessage failed: ${result.error ?? "unknown error"}`,
     );
   }
-  dependencies.log(`Posted to ${env.SLACK_CHANNEL_ID} ts=${result.ts ?? ""}`);
+  dependencies.log(`Posted to Slack; ts=${result.ts ?? ""}`);
 }
 
 export async function runNotifier(
