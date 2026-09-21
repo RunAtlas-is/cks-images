@@ -1,9 +1,13 @@
 name: Dependabot auto-merge
 
-# Patch and minor dependency bumps are approved and queued for auto-merge.
-# Auto-merge waits for the required "validate" status check from the CI
-# workflow, so a bump that breaks install, typecheck, or script validation
-# never lands. Major bumps of every ecosystem are left for manual review.
+# Patch and minor dependency bumps are queued for auto-merge. GitHub holds the
+# merge until the required "validate" status check from the CI workflow passes,
+# so a bump that breaks install, typecheck, or script validation never lands.
+# Major bumps of every ecosystem are left for manual review.
+#
+# No approving review is requested. GitHub Actions is not permitted to approve
+# pull requests, and main requires the "validate" check rather than a review,
+# so the required check alone gates the merge.
 #
 # Requires "Allow auto-merge" and squash merge enabled on the repository, and
 # branch protection on main requiring the "validate" check.
@@ -15,7 +19,7 @@ permissions:
 
 jobs:
   automerge:
-    if: ${{ github.event.pull_request.user.login == 'dependabot[bot]' }}
+    if: ${{ github.actor == 'dependabot[bot]' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -25,13 +29,11 @@ jobs:
         id: meta
         uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
 
-      - name: Approve and enable auto-merge for safe bumps
+      - name: Enable auto-merge for safe bumps
         if: >-
           steps.meta.outputs.update-type == 'version-update:semver-patch' ||
           steps.meta.outputs.update-type == 'version-update:semver-minor'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_URL: ${{ github.event.pull_request.html_url }}
-        run: |
-          gh pr review --approve "$PR_URL"
-          gh pr merge --auto --squash "$PR_URL"
+        run: gh pr merge --auto --squash "$PR_URL"
