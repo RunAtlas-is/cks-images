@@ -1,0 +1,85 @@
+name: Workflow lint
+
+# Static analysis of this repository's own workflow files. actionlint covers
+# schema, expression and embedded-shell errors (it runs shellcheck over every
+# `run:` block); zizmor covers the supply-chain and permission defects that
+# schema validity cannot see: mutable action references, template injection
+# into `run:`, credential persistence, and over-broad `permissions`.
+#
+# Self-contained copy of the org's shared workflow lint. This repository is
+# public and GitHub does not allow a public repository to call a reusable
+# workflow that lives in a private one, so the caller pattern the private
+# repositories use cannot resolve here. Keep the two in sync.
+#
+# Both tools install from a release tarball checked against a pinned SHA-256,
+# so a replaced release cannot change what runs here. Change the version and
+# the digest together.
+#
+# zizmor runs offline. Its online audits resolve every referenced repository
+# through the GitHub API, and an audit that silently degrades is worse than
+# one that is declared absent.
+#
+# No path filter: a check that skips the pull requests which do not touch
+# .github never reports on them, and a required status check that never
+# reports blocks the merge instead of passing it.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  workflow-lint:
+    name: Workflow lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install actionlint
+        env:
+          ACTIONLINT_VERSION: 1.7.12
+          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          set -euo pipefail
+          curl -fsSLo "$RUNNER_TEMP/actionlint.tar.gz" \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          echo "${ACTIONLINT_SHA256}  $RUNNER_TEMP/actionlint.tar.gz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/workflow-lint"
+          tar -xzf "$RUNNER_TEMP/actionlint.tar.gz" -C "$RUNNER_TEMP/workflow-lint" actionlint
+
+      - name: Install zizmor
+        env:
+          ZIZMOR_VERSION: 1.30.1
+          ZIZMOR_SHA256: e65324f4430c2717591937edcec90ccbefaf14c174f8ec9415e03ca875b46e1a
+        run: |
+          set -euo pipefail
+          curl -fsSLo "$RUNNER_TEMP/zizmor.tar.gz" \
+            "https://github.com/zizmorcore/zizmor/releases/download/v${ZIZMOR_VERSION}/zizmor-x86_64-unknown-linux-gnu.tar.gz"
+          echo "${ZIZMOR_SHA256}  $RUNNER_TEMP/zizmor.tar.gz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/workflow-lint"
+          tar -xzf "$RUNNER_TEMP/zizmor.tar.gz" -C "$RUNNER_TEMP/workflow-lint" zizmor
+
+      - name: Run actionlint
+        # shellcheck ships on the runner image; actionlint uses it to lint the
+        # bash embedded in workflow `run:` blocks.
+        run: |
+          set -euo pipefail
+          shellcheck --version
+          "$RUNNER_TEMP/workflow-lint/actionlint" -color
+
+      - name: Run zizmor
+        # Every waiver lives in .github/zizmor.yml, which zizmor discovers
+        # from the repository root.
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/workflow-lint/zizmor" \
+            --persona regular \
+            --min-severity medium \
+            --format github \
+            --no-progress \
+            .github/workflows

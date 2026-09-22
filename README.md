@@ -22,6 +22,7 @@ publishes the static catalog through GitHub Pages.
 .
 ├── .github/workflows/cks-images.yml   daily builds, signing, Pages deploy
 ├── .github/workflows/ci.yml           pull request and main validation
+├── .github/workflows/workflow-lint.yml  actionlint and zizmor over the workflows
 ├── docs/                              operations and CloudStack integration
 ├── index/                             Bun static catalog generator
 ├── keys/                              public artifact signing keys
