@@ -106,6 +106,8 @@ jobs:
       FORCE_REBUILD: ${{ github.event.inputs.force_rebuild || 'false' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Validate required secrets
         run: |
@@ -128,7 +130,8 @@ jobs:
         run: |
           set -euo pipefail
           export GNUPGHOME="${RUNNER_TEMP}/gnupg"
-          mkdir -m 700 -p "$GNUPGHOME"
+          mkdir -p "$GNUPGHOME"
+          chmod 700 "$GNUPGHOME"
           printf '%s' "${GPG_PRIVATE_KEY_B64}" | base64 -d | gpg --batch --import
           echo "GNUPGHOME=$GNUPGHOME" >> "$GITHUB_ENV"
 
@@ -143,6 +146,7 @@ jobs:
       - name: Resolve latest patch for ${{ matrix.minor }}
         id: version
         env:
+          MINOR: ${{ matrix.minor }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
@@ -151,7 +155,7 @@ jobs:
               -H "Accept: application/vnd.github+json" \
               -H "Authorization: Bearer ${GH_TOKEN}" \
               "https://api.github.com/repos/kubernetes/kubernetes/releases?per_page=100" \
-            | jq -r --arg minor "v${{ matrix.minor }}." '
+            | jq -r --arg minor "v${MINOR}." '
                 [.[] | select(.prerelease == false) | select(.tag_name | startswith($minor))]
                 | sort_by(.tag_name | ltrimstr("v") | split(".") | map(tonumber))
                 | last
@@ -160,7 +164,7 @@ jobs:
             | tr -d 'v'
           )"
           if [[ -z "$latest" || "$latest" == "null" ]]; then
-            echo "No stable release found for ${{ matrix.minor }}" >&2
+            echo "No stable release found for ${MINOR}" >&2
             exit 1
           fi
           prefix="${S3_PREFIX#/}"
@@ -173,6 +177,8 @@ jobs:
 
       - name: Check existing object
         id: existing
+        env:
+          OBJECT_KEY: ${{ steps.version.outputs.object_key }}
         run: |
           set -euo pipefail
           if [[ "${FORCE_REBUILD}" == "true" ]]; then
@@ -181,7 +187,7 @@ jobs:
           fi
           set +e
           out="$(aws --endpoint-url "${AWS_ENDPOINT_URL}" s3api head-object \
-            --bucket "${BUCKET_NAME}" --key "${{ steps.version.outputs.object_key }}" 2>&1)"
+            --bucket "${BUCKET_NAME}" --key "${OBJECT_KEY}" 2>&1)"
           rc=$?
           set -e
           if [[ $rc -eq 0 ]]; then
@@ -189,7 +195,7 @@ jobs:
           elif [[ "$out" == *"Not Found"* || "$out" == *"NoSuchKey"* || "$out" == *"404"* ]]; then
             echo "already_built=false" >> "$GITHUB_OUTPUT"
           else
-            echo "head-object failed for ${{ steps.version.outputs.object_key }} (rc=$rc): $out" >&2
+            echo "head-object failed for ${OBJECT_KEY} (rc=$rc): $out" >&2
             exit 1
           fi
 
@@ -201,12 +207,14 @@ jobs:
 
       - name: Record built ISO digests
         if: steps.existing.outputs.already_built != 'true'
+        env:
+          MINOR: ${{ matrix.minor }}
         run: |
           set -euo pipefail
           # Provenance record for the sign job: only ISOs listed here (or
           # already attested by a signed CHECKSUM set) may be signed.
           mkdir -p "${RUNNER_TEMP}/built-digests"
-          out="${RUNNER_TEMP}/built-digests/${{ matrix.minor }}.txt"
+          out="${RUNNER_TEMP}/built-digests/${MINOR}.txt"
           for iso in output/*.iso; do
             digest="$(awk '{print $1}' "${iso}.sha256")"
             printf '%s  %s\n' "$digest" "$(basename "$iso")" >> "$out"
@@ -246,6 +254,8 @@ jobs:
       GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install prerequisites
         run: |
@@ -263,7 +273,8 @@ jobs:
           test -n "${AWS_SECRET_ACCESS_KEY}" || { echo "S3_SECRET_ACCESS_KEY is missing" >&2; exit 1; }
           test -n "${GPG_PRIVATE_KEY_B64}" || { echo "GPG_PRIVATE_KEY_B64_2026 is missing" >&2; exit 1; }
           export GNUPGHOME="${RUNNER_TEMP}/gnupg"
-          mkdir -m 700 -p "$GNUPGHOME"
+          mkdir -p "$GNUPGHOME"
+          chmod 700 "$GNUPGHOME"
           printf '%s' "${GPG_PRIVATE_KEY_B64}" | base64 -d | gpg --batch --import
           # Verifying already-published signatures needs the public half of
           # every trusted key, including the previous one.
@@ -323,6 +334,8 @@ jobs:
       AWS_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY || secrets.AWS_SECRET_ACCESS_KEY }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
 
       - name: Validate required secrets
@@ -338,7 +351,8 @@ jobs:
       - name: Build Pages site
         run: |
           set -euo pipefail
-          export CLOUDSTACK_FORMAT="$(cut -d. -f1-2 <<<"${CLOUDSTACK_VERSION}")"
+          CLOUDSTACK_FORMAT="$(cut -d. -f1-2 <<<"${CLOUDSTACK_VERSION}")"
+          export CLOUDSTACK_FORMAT
           cd index
           bun install --frozen-lockfile
           bun run build
@@ -371,6 +385,8 @@ jobs:
       GPG_SIGNING_FINGERPRINT: ${{ vars.GPG_TRUSTED_FINGERPRINTS || '4BB5C9F558FBD4A0981F07EF1A2D98FB5D036FC3,4C2D72FDDEF77A5CC4A7D2C421CA4588DCB6991E' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install prerequisites
         run: |
