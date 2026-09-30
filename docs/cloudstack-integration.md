@@ -202,44 +202,31 @@ Delete reference for cleanup-only roles:
 ## Tenant API Endpoint
 
 CKS injects a `cloudstack-secret` into tenant clusters. That secret contains the
-CloudStack API URL used by the CloudStack cloud-controller-manager and related
-components. CloudStack's CKS docs call this the global `endpoint.url` setting,
-and the URL must be reachable from pods inside the tenant Kubernetes network.
+CloudStack API URL used by the CloudStack cloud-controller-manager and the
+CloudStack CSI driver. CloudStack takes the URL from the global `endpoint.url`
+setting, and the URL must be reachable from pods inside the tenant Kubernetes
+network.
 
-The broken state reported by a tenant is:
-
-```text
-http://172.30.0.100:8080/client/api
-```
-
-`172.30.0.100` is the internal management VIP and is not routable from a CKS
-cluster's auto-created isolated tenant network. LoadBalancer reconciliation
-therefore times out when the controller tries to call CloudStack.
-
-For Atlas Cloud, set `endpoint.url` to the public DNS name and HTTPS API path:
+For Atlas Cloud, `endpoint.url` is the public DNS name and HTTPS API path:
 
 ```text
-https://sky.runatlas.is/client/api
+https://sky.atlascloud.is/client/api
 ```
 
-The CloudStack API is served on HTTPS port 443. Tenant networks currently need
-an internal routing shim for this name: `sky.runatlas.is` resolves publicly to
-the `.8` address, while tenant CKS clusters should reach the equivalent `.1`
-address from inside the isolated network. Prefer preserving the DNS name for
-TLS validation and adding a node-level `/etc/hosts` or equivalent DNS override
-that maps `sky.runatlas.is` to the tenant-reachable `.1` address. A bare IP
-URL should only be a temporary fallback because it loses the hostname/certificate
-contract.
+Tenant cluster nodes reach this name through their isolated network's source
+NAT address and public DNS, with no DNS override, and the certificate matches
+the hostname. An internal management address is not a valid value: tenant
+networks cannot route to it, and `LoadBalancer` reconciliation times out when
+the controller tries to call CloudStack.
 
-If that path changes, the invariant stays the same: `endpoint.url` must be an
-HTTPS CloudStack API URL that CKS nodes and pods can reach, not a management-only
-VIP.
+The invariant is that `endpoint.url` is an HTTPS CloudStack API URL that CKS
+nodes and pods can reach, not a management-only address.
 
-After changing `endpoint.url`, newly created clusters should receive the correct
-secret automatically. Existing affected clusters need their generated
-`cloudstack-secret` redeployed or the cluster recreated. CloudStack maintainers
-point to `/opt/bin/deploy-cloudstack-secret` on the control node for redeploying
-the generated secret after the URL is fixed:
+CloudStack creates the secret only when it is absent, so a changed
+`endpoint.url` reaches newly created clusters only. An existing cluster keeps
+the URL it was created with until its `cloudstack-secret` is deleted and
+regenerated. CloudStack maintainers point to `/opt/bin/deploy-cloudstack-secret`
+on the control node for redeploying the generated secret:
 
 <https://github.com/apache/cloudstack/discussions/9267>
 
