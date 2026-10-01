@@ -65,6 +65,11 @@ const CKS_DIRECT_DOWNLOAD = /^true$/i.test(process.env.CKS_DIRECT_DOWNLOAD ?? "f
 // CloudStack sync as manifest images; artifacts for other (or unmarked)
 // contracts stay listed in the HTML index but are never registered.
 const CLOUDSTACK_FORMAT = process.env.CLOUDSTACK_FORMAT ?? "4.22";
+// CCM marker of the cloud controller manager the build currently ships (the
+// first 12 hex digits of the CCM_IMAGE digest, as scripts/build-iso.sh names
+// it), or null when ISOs keep the upstream controller. The manifest offers one
+// artifact per version and prefers the one carrying this marker.
+const CCM_MARKER = /@sha256:([0-9a-f]{12})[0-9a-f]{52}$/.exec(process.env.CCM_IMAGE ?? "")?.[1] ?? null;
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DIST = process.env.DIST_DIR ?? join(HERE, "dist");
@@ -91,6 +96,7 @@ type ParsedIso = {
   version: string;
   minorKey: string;
   formatTag: string | null;
+  ccmMarker: string | null;
   sourceArch: string;
   cloudstackArch: string;
   sortKey: number;
@@ -221,7 +227,8 @@ function formatTimestamp(d: Date): string {
   return `${iso.slice(0, 10)} ${iso.slice(11, 16)}`;
 }
 
-const isoNameRe = /^setup-v(\d+)\.(\d+)\.(\d+)-[^-]+(?:-cs(\d+\.\d+))?-(amd64|arm64)(?:-(x86_64|aarch64))?\.iso$/;
+const isoNameRe =
+  /^setup-v(\d+)\.(\d+)\.(\d+)-[^-]+(?:-cs(\d+\.\d+))?(?:-ccm([0-9a-f]{12}))?-(amd64|arm64)(?:-(x86_64|aarch64))?\.iso$/;
 function cloudstackArch(sourceArch: string, explicitArch?: string): string {
   if (explicitArch) return explicitArch;
   return sourceArch === "arm64" ? "aarch64" : "x86_64";
@@ -229,18 +236,31 @@ function cloudstackArch(sourceArch: string, explicitArch?: string): string {
 
 function parseIso(name: string): ParsedIso | null {
   const m = isoNameRe.exec(name);
-  if (!m || !m[1] || !m[2] || !m[3] || !m[5]) return null;
+  if (!m || !m[1] || !m[2] || !m[3] || !m[6]) return null;
   const major = Number(m[1]), minor = Number(m[2]), patch = Number(m[3]);
-  const sourceArch = m[5];
+  const sourceArch = m[6];
   return {
     major, minor, patch,
     version: `${major}.${minor}.${patch}`,
     minorKey: `${major}.${minor}`,
     formatTag: m[4] ?? null,
+    ccmMarker: m[5] ?? null,
     sourceArch,
-    cloudstackArch: cloudstackArch(sourceArch, m[6]),
+    cloudstackArch: cloudstackArch(sourceArch, m[7]),
     sortKey: major * 1_000_000 + minor * 1_000 + patch,
   };
+}
+
+// CloudStack registers one artifact per Kubernetes version, so the manifest
+// offers exactly one: the build carrying the current CCM marker, else the
+// unmarked upstream-controller build, else the newest other build. Rolling
+// CCM_IMAGE back therefore returns every version to the artifact it had.
+function preferredArtifact<T extends { entry: Entry; iso: ParsedIso }>(all: T[], iso: ParsedIso): T | undefined {
+  const rank = (candidate: ParsedIso) =>
+    candidate.ccmMarker === CCM_MARKER ? 0 : candidate.ccmMarker === null ? 1 : 2;
+  return all
+    .filter((other) => other.iso.version === iso.version && other.iso.cloudstackArch === iso.cloudstackArch)
+    .sort((a, b) => rank(a.iso) - rank(b.iso) || b.entry.modified.getTime() - a.entry.modified.getTime())[0];
 }
 
 function buildManifest(args: {
@@ -265,6 +285,7 @@ function buildManifest(args: {
     .map((entry) => ({ entry, name: stripPrefix(entry.key), iso: parseIso(stripPrefix(entry.key)) }))
     .filter((item): item is { entry: Entry; name: string; iso: ParsedIso } => item.iso != null)
     .filter(({ iso }) => iso.formatTag === CLOUDSTACK_FORMAT)
+    .filter((item, _, all) => item === preferredArtifact(all, item.iso))
     .map(({ entry, name, iso }) => {
       const checksum = checksumSetByMinor.get(iso.minorKey);
       return {

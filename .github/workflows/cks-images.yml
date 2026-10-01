@@ -59,6 +59,15 @@ env:
   CLOUDSTACK_VERSION: ${{ vars.CLOUDSTACK_VERSION || '4.22.1.0' }}
   DASHBOARD_YAML_URL: ${{ vars.DASHBOARD_YAML_URL || 'https://raw.githubusercontent.com/kubernetes/dashboard/v2.7.0/aio/deploy/recommended.yaml' }}
   CNI_YAML_URL: ${{ vars.CNI_YAML_URL || 'https://raw.githubusercontent.com/projectcalico/calico/v3.32.1/manifests/calico.yaml' }}
+  # Cloud controller manager the ISOs deploy, by digest, and the
+  # apache/cloudstack-kubernetes-provider commit whose deployment.yaml carries
+  # it (the ccm-image workflow builds and publishes that image). Empty keeps
+  # the upstream manifest and its v1.2.0 image. A change here yields new ISO
+  # names for every active minor on the next run, which the CloudStack sync
+  # then registers in place of the current artifacts, so it is a production
+  # change to new-cluster creation (docs/cloudstack-integration.md).
+  CCM_IMAGE: ""
+  CCM_SOURCE_COMMIT: ""
 
 jobs:
   minors:
@@ -172,8 +181,14 @@ jobs:
             prefix="${prefix}/"
           fi
           cs_format="$(cut -d. -f1-2 <<<"${CLOUDSTACK_VERSION}")"
+          # Same CCM marker as scripts/build-iso.sh.
+          ccm_marker=""
+          if [[ -n "${CCM_IMAGE}" ]]; then
+            ccm_digest="${CCM_IMAGE##*@sha256:}"
+            ccm_marker="-ccm${ccm_digest:0:12}"
+          fi
           echo "k8s_version=$latest" >> "$GITHUB_OUTPUT"
-          echo "object_key=${prefix}setup-v${latest}-calico-cs${cs_format}-amd64-x86_64.iso" >> "$GITHUB_OUTPUT"
+          echo "object_key=${prefix}setup-v${latest}-calico-cs${cs_format}${ccm_marker}-amd64-x86_64.iso" >> "$GITHUB_OUTPUT"
 
       - name: Check existing object
         id: existing

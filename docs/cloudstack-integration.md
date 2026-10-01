@@ -233,10 +233,110 @@ on the control node for redeploying the generated secret:
 Validation on an affected cluster:
 
 ```bash
-kubectl -n kube-system get secret cloudstack-secret -o yaml
-kubectl -n kube-system logs -l component=cloud-controller-manager
+kubectl -n kube-system get secret cloudstack-secret \
+  -o jsonpath='{.data.cloud-config}' | base64 -d | grep '^api-url'
+kubectl -n kube-system logs deployment/cloud-controller-manager --tail=50
 ```
+
+The first command prints only the URL line; the secret also holds the
+account's API and secret keys.
 
 The secret should contain the tenant-routable API URL, and creating a
 `Service` of type `LoadBalancer` should list and create CloudStack load
 balancer rules without timing out.
+
+## Cloud Controller Manager
+
+CKS deploys the CloudStack cloud controller manager (CCM), the component that
+turns a `LoadBalancer` Service into CloudStack load balancer rules, from the
+binaries ISO. The upstream ISO build script bundles `provider.yaml` from the
+`main` branch of `apache/cloudstack-kubernetes-provider` together with the
+image it names, `apache/cloudstack-kubernetes-provider:v1.2.0`. When a cluster
+is created, the control node copies `provider.yaml` to `/opt/provider/` and
+CloudStack's `deploy-provider` script applies it, unless a
+`cloud-controller-manager` pod already exists. `upgradeKubernetesCluster`
+imports the new ISO's images and copies its `provider.yaml`, but does not apply
+it, so an upgrade never changes a running cluster's controller.
+
+The v1.2.0 controller calls `listManagementServersMetrics` at start-up. That
+API is root-admin only, so for every tenant account the call fails with error
+432 and the controller exits; tenant clusters then get no load balancer
+addresses
+([apache/cloudstack-kubernetes-provider#94](https://github.com/apache/cloudstack-kubernetes-provider/issues/94)).
+Upstream commit
+[`5147f76`](https://github.com/apache/cloudstack-kubernetes-provider/commit/5147f76478f66191513d8741ffd8800a35684fc2)
+replaces the call with `listCapabilities`; no release contains it.
+
+### Pinned controller in the ISOs
+
+The `CCM image` workflow (`.github/workflows/ccm-image.yml`) builds the
+upstream source at a pinned commit and publishes it as
+`ghcr.io/runatlas-is/cloudstack-kubernetes-provider`, tagged with the commit.
+Nodes pull it anonymously, so the GHCR package must be public.
+
+Two variables in `.github/workflows/cks-images.yml` select the controller the
+ISOs deploy:
+
+- `CCM_IMAGE`: the published image by digest,
+  `ghcr.io/runatlas-is/cloudstack-kubernetes-provider@sha256:<digest>`.
+- `CCM_SOURCE_COMMIT`: the upstream commit the image was built from. The ISO
+  takes `deployment.yaml` from that commit and replaces its image line with
+  `CCM_IMAGE`.
+
+When both are empty, ISOs keep the upstream manifest and the v1.2.0 image.
+When set, `scripts/build-iso.sh` refuses to publish an ISO whose
+`provider.yaml` does not name `CCM_IMAGE` or that lacks the image archive, and
+the artifact name carries a CCM marker, the first 12 hex digits of the image
+digest:
+
+```text
+setup-v<k8s>-calico-cs<major.minor>-ccm<digest12>-<arch>-<machine>.iso
+```
+
+A new marker gives every active Kubernetes patch a new artifact URL, so the
+next build rebuilds the whole matrix instead of overwriting ISOs that
+CloudStack already registered. The manifest offers one artifact per version:
+the one with the current marker, else the unmarked build. The sync then
+registers the marked artifacts and disables the previous registrations once the
+replacements are `Ready` (see [Version Lifecycle](#version-lifecycle)).
+
+Setting or changing `CCM_IMAGE` therefore changes what new clusters run in
+every zone the sync serves, within one build and one sync run. Treat it as a
+production change. To roll back, first re-enable the earlier entries
+(`updateKubernetesSupportedVersion state=Enabled`), because the sync disabled
+them and does not re-enable an entry without `--enable-existing`. Then restore
+the previous values: the next build publishes a manifest that falls back to the
+earlier artifacts, and the next sync disables the marked entries.
+
+### Existing clusters
+
+A cluster keeps the controller it was created with. To move an existing
+cluster to the pinned controller, use the cluster's kubeconfig
+(`getKubernetesClusterConfig`) and patch the deployment in place. Its
+`cloudstack-secret` must already name a tenant-reachable `api-url` (see
+[Tenant API Endpoint](#tenant-api-endpoint)).
+
+```bash
+NEW_IMAGE='ghcr.io/runatlas-is/cloudstack-kubernetes-provider@sha256:<digest>'
+K='kubectl -n kube-system'
+
+# Prints only the URL line, never the keys.
+$K get secret cloudstack-secret -o jsonpath='{.data.cloud-config}' \
+  | base64 -d | grep '^api-url'
+
+# The current image is the rollback value.
+$K get deployment cloud-controller-manager \
+  -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'
+
+$K set image deployment/cloud-controller-manager \
+  cloud-controller-manager="$NEW_IMAGE"
+$K rollout status deployment/cloud-controller-manager --timeout=300s
+$K logs deployment/cloud-controller-manager --tail=30
+```
+
+The logs must not show error 432. A `LoadBalancer` Service then receives an
+external address within a few minutes. CKS does not reapply `provider.yaml`
+to a cluster that has a controller pod, and upgrades do not apply it, so the
+patch persists. To roll back, run the same `set image` with the recorded
+previous image.
+

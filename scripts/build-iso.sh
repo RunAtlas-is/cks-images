@@ -30,6 +30,11 @@
 #   GPG_PASSPHRASE        optional passphrase for SIGNING_KEY in CI
 #   UPSTREAM_REF          override the fetched apache/cloudstack ref; defaults
 #                         to the CLOUDSTACK_VERSION release tag
+#   CCM_IMAGE             cloud controller manager image the ISO deploys, by
+#                         digest (<repository>@sha256:<64 hex>); unset keeps
+#                         the upstream manifest and its v1.2.0 image
+#   CCM_SOURCE_COMMIT     apache/cloudstack-kubernetes-provider commit whose
+#                         deployment.yaml carries CCM_IMAGE; required with it
 
 set -euo pipefail
 
@@ -47,7 +52,26 @@ UPSTREAM_REF="${UPSTREAM_REF:-refs/tags/${CLOUDSTACK_VERSION}}"
 UPSTREAM_URL="https://raw.githubusercontent.com/apache/cloudstack/${UPSTREAM_REF}/scripts/util/create-kubernetes-binaries-iso.sh"
 # Format marker: the CloudStack major.minor whose contract this ISO satisfies.
 CS_FORMAT="$(cut -d. -f1-2 <<<"${CLOUDSTACK_VERSION}")"
-BUILD_NAME="setup-v${K8S_VERSION}-calico-cs${CS_FORMAT}-${ARCH}"
+
+# CCM marker: an ISO that deploys a pinned cloud controller manager carries
+# the first 12 hex digits of its image digest, so a changed controller yields a
+# new artifact URL for the same Kubernetes version instead of overwriting one
+# that CloudStack may already have registered. index/build.ts and the
+# workflow's object key derive the same marker.
+CCM_MARKER=""
+if [[ -n "${CCM_IMAGE:-}" ]]; then
+  if [[ ! "${CCM_IMAGE}" =~ ^[a-z0-9./_-]+@sha256:([0-9a-f]{64})$ ]]; then
+    echo "!! CCM_IMAGE must be <repository>@sha256:<digest>, got ${CCM_IMAGE}" >&2
+    exit 1
+  fi
+  CCM_DIGEST="${BASH_REMATCH[1]}"
+  CCM_MARKER="-ccm${CCM_DIGEST:0:12}"
+  if [[ ! "${CCM_SOURCE_COMMIT:-}" =~ ^[0-9a-f]{40}$ ]]; then
+    echo "!! CCM_SOURCE_COMMIT must be a full commit hash when CCM_IMAGE is set" >&2
+    exit 1
+  fi
+fi
+BUILD_NAME="setup-v${K8S_VERSION}-calico-cs${CS_FORMAT}${CCM_MARKER}-${ARCH}"
 
 mkdir -p "$OUTPUT_DIR"
 workdir="$(mktemp -d)"
@@ -68,6 +92,31 @@ if ! grep -q 'DASHBOARD_YAML_CONFIG' "$workdir/create-kubernetes-binaries-iso.sh
   echo "!! Upstream script at ${UPSTREAM_REF} does not take DASHBOARD_YAML_CONFIG;" >&2
   echo "!! its ISO layout does not match the CloudStack ${CLOUDSTACK_VERSION} contract." >&2
   exit 1
+fi
+
+# The upstream script downloads the provider manifest from the
+# cloudstack-kubernetes-provider main branch and bundles whatever image it
+# names. With CCM_IMAGE set, the manifest comes from CCM_SOURCE_COMMIT with its
+# single image line replaced, and the script reads that local file instead.
+if [[ -n "${CCM_MARKER}" ]]; then
+  upstream_provider_url='PROVIDER_URL="https://raw.githubusercontent.com/apache/cloudstack-kubernetes-provider/main/deployment.yaml"'
+  if [[ "$(grep -cxF "$upstream_provider_url" "$workdir/create-kubernetes-binaries-iso.sh")" != 1 ]]; then
+    echo "!! Upstream script at ${UPSTREAM_REF} no longer sets PROVIDER_URL as expected;" >&2
+    echo "!! the CCM_IMAGE override cannot be applied." >&2
+    exit 1
+  fi
+  provider_manifest="$workdir/provider.yaml"
+  curl -fsSL "https://raw.githubusercontent.com/apache/cloudstack-kubernetes-provider/${CCM_SOURCE_COMMIT}/deployment.yaml" \
+    -o "$provider_manifest"
+  if [[ "$(grep -c 'image:' "$provider_manifest")" != 1 ]]; then
+    echo "!! Provider manifest at ${CCM_SOURCE_COMMIT} does not carry exactly one image line" >&2
+    exit 1
+  fi
+  sed -i -E "s#^([[:space:]]*image:).*#\1 ${CCM_IMAGE}#" "$provider_manifest"
+  grep -qxE "[[:space:]]*image: ${CCM_IMAGE}" "$provider_manifest"
+  sed -i "s#^PROVIDER_URL=.*#PROVIDER_URL=\"file://${provider_manifest}\"#" \
+    "$workdir/create-kubernetes-binaries-iso.sh"
+  echo ">> Cloud controller manager: ${CCM_IMAGE} (manifest from ${CCM_SOURCE_COMMIT})"
 fi
 
 echo ">> Building ISO for k8s=$K8S_VERSION arch=$ARCH cloudstack=$CLOUDSTACK_VERSION"
@@ -104,6 +153,19 @@ for required in dashboard.yaml network.yaml kubeadm kubectl kubelet; do
     exit 1
   fi
 done
+if [[ -n "${CCM_MARKER}" ]]; then
+  if ! isoinfo -R -i "$iso_path" -x /provider.yaml | grep -qxE "[[:space:]]*image: ${CCM_IMAGE}"; then
+    echo "!! ${iso_name} provider.yaml does not deploy ${CCM_IMAGE}; refusing to publish" >&2
+    exit 1
+  fi
+  # The upstream script names each image archive after the last path element
+  # of the image reference; ISO9660 names mangle '@' and ':', so read the Rock
+  # Ridge names the node bootstrap sees.
+  if ! isoinfo -R -f -i "$iso_path" | grep -qxF "/docker/${CCM_IMAGE##*/}.tar"; then
+    echo "!! ${iso_name} does not carry the ${CCM_IMAGE} image archive; refusing to publish" >&2
+    exit 1
+  fi
+fi
 
 echo ">> Built $iso_path ($(du -h "$iso_path" | cut -f1))"
 sha256sum "$iso_path" > "${iso_path}.sha256"
