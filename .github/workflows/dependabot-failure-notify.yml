@@ -30,15 +30,16 @@ permissions:
   pull-requests: read
 
 env:
-  SLACK_CHANNEL_ID: C09DCAPTS3H
+  SLACK_CHANNEL_ID: ${{ vars.SLACK_CHANNEL_ID }}
 
 jobs:
   notify:
     if: >-
+      vars.SLACK_CHANNEL_ID != '' && (
       (github.event_name == 'workflow_run' &&
        github.event.workflow_run.conclusion == 'failure' &&
        github.event.workflow_run.actor.login == 'dependabot[bot]') ||
-      (github.event_name == 'workflow_dispatch' && inputs.test)
+      (github.event_name == 'workflow_dispatch' && inputs.test))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
