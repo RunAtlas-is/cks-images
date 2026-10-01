@@ -27,13 +27,16 @@ concurrency:
   group: cks-images
   cancel-in-progress: false
 
+# Publisher-specific values come from repository variables with no default,
+# so a fork never targets another publisher's storage or catalog; the minors
+# job refuses to start while one is missing (docs/operations.md).
 env:
-  AWS_ENDPOINT_URL: ${{ vars.S3_ENDPOINT_URL || 'https://s3.runatlas.is' }}
-  BUCKET_NAME: ${{ vars.S3_BUCKET || 'atlas-static-assets' }}
-  S3_BUCKET: ${{ vars.S3_BUCKET || 'atlas-static-assets' }}
-  S3_ENDPOINT_URL: ${{ vars.S3_ENDPOINT_URL || 'https://s3.runatlas.is' }}
+  AWS_ENDPOINT_URL: ${{ vars.S3_ENDPOINT_URL }}
+  BUCKET_NAME: ${{ vars.S3_BUCKET }}
+  S3_BUCKET: ${{ vars.S3_BUCKET }}
+  S3_ENDPOINT_URL: ${{ vars.S3_ENDPOINT_URL }}
   S3_PREFIX: ${{ vars.S3_PREFIX || 'cks/' }}
-  # The Ceph RGW endpoint does not return the flexible-checksum response
+  # Ceph RGW endpoints do not return the flexible-checksum response
   # fields aws-cli defaults to since v2.23 (Jan 2025), which makes a
   # multipart `aws s3 cp` of the (~970 MB) ISO crash s3transfer with
   # "argument of type 'NoneType' is not a container or iterable" partway
@@ -42,10 +45,10 @@ env:
   # https://docs.aws.amazon.com/sdkref/latest/guide/feature-dataintegrity.html
   AWS_REQUEST_CHECKSUM_CALCULATION: when_required
   AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
-  ARTIFACT_BASE_URL: ${{ vars.ARTIFACT_BASE_URL || 'https://s3.runatlas.is/atlas-static-assets' }}
-  SITE_BASE_URL: ${{ vars.SITE_BASE_URL || 'https://runatlas-is.github.io/cks-images' }}
-  DOCS_URL: ${{ vars.DOCS_URL || 'https://github.com/RunAtlas-is/cks-images/blob/main/docs/operations.md' }}
-  SIGNING_KEY: ${{ vars.GPG_SIGNING_KEY || 'artifacts@runatlas.is' }}
+  ARTIFACT_BASE_URL: ${{ vars.ARTIFACT_BASE_URL }}
+  SITE_BASE_URL: ${{ vars.SITE_BASE_URL }}
+  DOCS_URL: ${{ vars.DOCS_URL || format('{0}/{1}/blob/main/docs/cloudstack-integration.md', github.server_url, github.repository) }}
+  SIGNING_KEY: ${{ vars.GPG_SIGNING_KEY }}
   # The current key signs; both keys verify, so artifacts signed before the
   # rotation keep their provenance without being re-signed (docs/operations.md).
   SIGNING_FINGERPRINT: ${{ vars.GPG_SIGNING_FINGERPRINT_2026 || '4BB5C9F558FBD4A0981F07EF1A2D98FB5D036FC3' }}
@@ -75,6 +78,18 @@ jobs:
     outputs:
       list: ${{ steps.resolve.outputs.list }}
     steps:
+      - name: Validate configuration
+        run: |
+          set -euo pipefail
+          missing=()
+          for name in S3_BUCKET S3_ENDPOINT_URL ARTIFACT_BASE_URL SITE_BASE_URL SIGNING_KEY; do
+            [[ -n "${!name}" ]] || missing+=("$name")
+          done
+          if (( ${#missing[@]} )); then
+            echo "Missing repository variables for: ${missing[*]} (docs/operations.md#running-the-pipeline)" >&2
+            exit 1
+          fi
+
       - name: Resolve active Kubernetes minors
         id: resolve
         env:
@@ -430,15 +445,13 @@ jobs:
   notify-failure:
     name: Notify Slack on failure
     needs: [minors, build, sign, pages, cloudstack]
-    if: failure()
+    if: failure() && vars.SLACK_CHANNEL_ID != ''
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read
     env:
-      # Same Slack channel this repository's Dependabot failure notifier
-      # already posts to.
-      SLACK_CHANNEL_ID: C09DCAPTS3H
+      SLACK_CHANNEL_ID: ${{ vars.SLACK_CHANNEL_ID }}
     steps:
       - name: Notify Slack
         env:
