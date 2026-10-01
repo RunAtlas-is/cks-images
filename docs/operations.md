@@ -81,17 +81,20 @@ variable unset disables the notification.
 The `CCM image` workflow builds `apache/cloudstack-kubernetes-provider` at the
 commit pinned in `.github/workflows/ccm-image.yml` for `linux/amd64` and
 `linux/arm64`, and publishes it to
-`ghcr.io/runatlas-is/cloudstack-kubernetes-provider:<commit>`. Pull requests
-that change the workflow build without publishing; a push to `main` or a manual
-run publishes and prints the image digest in the run summary.
+`ghcr.io/runatlas-is/cks-images/cloudstack-kubernetes-provider:<commit>`. Its
+`org.opencontainers.image.source` label links the package to this repository.
+Pull requests that change the workflow build without publishing; a push to
+`main` or a manual run publishes and prints the image digest in the run summary.
 
 The tag moves with each publish, and every publish yields a new digest. ISO
 builds use the digest set in `CCM_IMAGE`, so publishing alone changes no ISO.
 
 The ISO build and the nodes pull the image without credentials, so the GHCR
-package must be public. GitHub sets package visibility only in the package
-settings page (Danger Zone, Change visibility); a package does not inherit
-visibility from its repository.
+package must be public. GitHub creates every new package as private and sets
+package visibility only in the package settings page (Danger Zone, Change
+visibility); a package does not inherit visibility from its repository. For
+this repository's image the page is
+<https://github.com/orgs/RunAtlas-is/packages/container/cks-images%2Fcloudstack-kubernetes-provider/settings>.
 
 ## Artifact Storage
 

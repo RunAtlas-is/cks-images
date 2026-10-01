@@ -127,9 +127,9 @@ without credentials from the build host.
 
 The `CCM image` workflow (`.github/workflows/ccm-image.yml`) builds upstream
 commit `5147f76` for `linux/amd64` and `linux/arm64` and publishes it as
-`ghcr.io/runatlas-is/cloudstack-kubernetes-provider:<commit>`. The run summary
-prints the digest. `CCM_IMAGE` in `.github/workflows/cks-images.yml` holds the
-digest the published ISOs use.
+`ghcr.io/runatlas-is/cks-images/cloudstack-kubernetes-provider:<commit>`. The
+run summary prints the digest. `CCM_IMAGE` in `.github/workflows/cks-images.yml`
+holds the digest the published ISOs use.
 
 To build the same image into another registry, with a buildx builder that
 supports multi-platform builds (`docker buildx create --use`):
@@ -340,7 +340,7 @@ build. Nodes pull the image from its registry when it is not already present,
 so they need access to that registry.
 
 ```bash
-NEW_IMAGE='ghcr.io/runatlas-is/cloudstack-kubernetes-provider@sha256:<digest>'
+NEW_IMAGE='ghcr.io/runatlas-is/cks-images/cloudstack-kubernetes-provider@sha256:<digest>'
 K='kubectl -n kube-system'
 
 # The current image is the rollback value.
