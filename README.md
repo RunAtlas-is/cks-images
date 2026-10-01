@@ -36,8 +36,11 @@ setup-v<k8s>-calico-cs<major.minor>[-ccm<digest12>]-<arch>-<machine>.iso
 
 `cs<major.minor>` is the CloudStack release whose ISO layout the image follows,
 and `-ccm<digest12>` names the first 12 hex digits of the controller image
-digest the ISO deploys. Every ISO has a `.sha256` file and a detached `.asc`
-signature, and every Kubernetes minor has a signed `CHECKSUM-<minor>` set.
+digest the ISO deploys. An ISO without the `-ccm` marker deploys the upstream
+v1.2.0 controller, which exits for every account that is not a root admin
+([Cloud controller manager](docs/cloudstack-integration.md#cloud-controller-manager)).
+Every ISO has a `.sha256` file and a detached `.asc` signature, and every
+Kubernetes minor has a signed `CHECKSUM-<minor>` set.
 
 ## Using the Images in CloudStack
 

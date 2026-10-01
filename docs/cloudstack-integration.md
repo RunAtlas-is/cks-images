@@ -295,7 +295,8 @@ not rewrite an existing `cloudstack-secret`, does not reapply `provider.yaml`
 to a cluster that has a controller pod, and upgrades do not apply it. Both
 changes below are made in the cluster with its kubeconfig
 (`getKubernetesClusterConfig`) and persist across upgrades. Apply them in this
-order: the controller cannot reach CloudStack until the API address is right.
+order, since the controller cannot reach CloudStack until the API address is
+right; skip the first when the `api-url` line already names a reachable URL.
 
 ### API address
 
@@ -335,8 +336,8 @@ To roll back, run the same replacement with the recorded URL.
 ### Controller image
 
 Set the controller to the digest the ISOs use (`CCM_IMAGE`) or to your own
-build. Nodes pull the image from its registry unless an upgrade already
-imported it from an ISO, so they need access to that registry.
+build. Nodes pull the image from its registry when it is not already present,
+so they need access to that registry.
 
 ```bash
 NEW_IMAGE='ghcr.io/runatlas-is/cloudstack-kubernetes-provider@sha256:<digest>'
@@ -385,7 +386,8 @@ Setting or changing `CCM_IMAGE` therefore changes what new clusters run in
 every zone the sync serves, within one build and one sync run. Prove a new
 controller on one minor first: build that minor alone (the workflow's
 `k8s_minor` input), register it, create a test cluster, and check a
-`LoadBalancer` Service before the rest of the matrix rebuilds.
+`LoadBalancer` Service. The next scheduled build rebuilds the remaining minors,
+so finish the check, or revert the change, before it runs.
 
 To roll back:
 
