@@ -20,6 +20,21 @@ ISO that has already been registered in CloudStack should be treated as
 immutable because CloudStack supported versions point at a specific URL and
 checksum.
 
+## Cloud Controller Manager Image
+
+The `CCM image` workflow builds `apache/cloudstack-kubernetes-provider` at the
+commit pinned in `.github/workflows/ccm-image.yml` for `linux/amd64` and
+`linux/arm64`, and publishes it to
+`ghcr.io/runatlas-is/cloudstack-kubernetes-provider:<commit>`. Pull requests
+that change the workflow build without publishing; a push to `main` or a manual
+run publishes and prints the image digest in the run summary.
+
+The tag moves with each publish, and every publish yields a new digest. ISO
+builds use the digest set in `CCM_IMAGE`, so publishing alone changes no ISO.
+Switching ISOs to a new digest is a separate change to `CCM_IMAGE` and
+`CCM_SOURCE_COMMIT`
+([CloudStack integration](cloudstack-integration.md#pinned-controller-in-the-isos)).
+
 ## Artifact Storage
 
 GitHub stores the source, workflow, and static catalog. ISO artifacts live in
@@ -60,6 +75,10 @@ Current public object paths:
 - `https://s3.runatlas.is/atlas-static-assets/cks/setup-v<version>-calico-amd64-x86_64.iso.sha256`
 - `https://s3.runatlas.is/atlas-static-assets/cks/setup-v<version>-calico-amd64-x86_64.iso.asc`
 - `https://s3.runatlas.is/atlas-static-assets/cks/CHECKSUM-<minor>`
+
+ISOs built with a pinned cloud controller manager carry a `-ccm<digest12>`
+marker before the architecture
+([CloudStack integration](cloudstack-integration.md#pinned-controller-in-the-isos)).
 - `https://s3.runatlas.is/atlas-static-assets/cks/CHECKSUM-<minor>.asc`
 
 The GitHub Pages catalog and `manifest.json` are generated from the bucket
@@ -164,6 +183,9 @@ export CNI_YAML_URL=https://raw.githubusercontent.com/projectcalico/calico/v3.32
 
 ./scripts/build-iso.sh
 ```
+
+To build with the pinned cloud controller manager, also set `CCM_IMAGE` and
+`CCM_SOURCE_COMMIT` to the values in `.github/workflows/cks-images.yml`.
 
 To upload locally, also set:
 
