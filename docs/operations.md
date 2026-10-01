@@ -1,24 +1,80 @@
 # Operations
 
+This guide covers the publishing pipeline: the daily build, the controller
+image, artifact storage, signing, and the catalog. It applies to this
+repository and to a fork that publishes its own catalog.
+
+## Running the Pipeline
+
+The `CKS images` workflow reads its target from repository configuration and
+refuses to run while a required value is missing. Apart from the signing keys,
+nothing in the workflow names a publisher, so a fork sets its own values,
+replaces the keys, and publishes an independent catalog.
+
+Repository secrets:
+
+| Secret | Purpose |
+| --- | --- |
+| `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | object storage publish identity ([Artifact storage](#artifact-storage)) |
+| `GPG_PRIVATE_KEY_B64_2026` | base64 of the armored private signing key |
+| `GPG_PASSPHRASE` | passphrase of that key, when it has one |
+| `SLACK_BOT_TOKEN` | optional; failure notifications |
+
+Repository variables:
+
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `S3_BUCKET` | yes | bucket holding the artifacts |
+| `S3_ENDPOINT_URL` | yes | S3 API endpoint of that bucket |
+| `ARTIFACT_BASE_URL` | yes | public URL of the bucket, without the prefix |
+| `SITE_BASE_URL` | yes | public URL of the GitHub Pages catalog |
+| `GPG_SIGNING_KEY` | yes | user ID or fingerprint of the signing key |
+| `GPG_SIGNING_FINGERPRINT_2026` | yes, for a fork | fingerprint that signs new artifacts |
+| `GPG_TRUSTED_FINGERPRINTS` | yes, for a fork | every fingerprint whose existing signatures still verify |
+| `S3_PREFIX` | no, default `cks/` | key prefix of the artifacts |
+| `DOCS_URL` | no | documentation link in the catalog; defaults to this repository's integration guide |
+| `CLOUDSTACK_VERSION` | no, default `4.22.1.0` | CloudStack release the ISOs target |
+| `CNI_VERSION`, `CRICTL_VERSION`, `CNI_YAML_URL`, `DASHBOARD_YAML_URL` | no | bundled component versions |
+| `SLACK_CHANNEL_ID` | no | Slack channel for failure notifications; unset disables them |
+
+The two fingerprint variables default to the keys committed under `keys/`. A
+fork replaces those key files and the key paths in the `sign` job and in
+`index/build.ts`, and sets both variables. Consumers of a fork's catalog pass
+its fingerprints to the sync through `GPG_SIGNING_FINGERPRINT` and its hosts
+through `CKS_ALLOWED_HOSTS`
+([Manifest sync](cloudstack-integration.md#manifest-sync)).
+
+The cloud controller manager the ISOs ship is fixed in the workflow file
+(`CCM_IMAGE`, `CCM_SOURCE_COMMIT`), not in a variable, so changing it is a
+reviewed commit ([Cloud controller manager](cloudstack-integration.md#cloud-controller-manager)).
+
 ## Daily Build
 
 The `CKS images` workflow runs every day at 06:00 UTC and can also be started
-manually from GitHub Actions.
+manually from GitHub Actions. It:
 
-By default it builds the latest stable patch release for the active Kubernetes
-minor versions listed by endoflife.date. If the expected ISO object already
-exists in object storage, the workflow skips rebuilding it and continues
-with checksum signing, manifest generation, and site generation.
+1. Resolves the four newest Kubernetes minors that endoflife.date lists as
+   supported.
+2. Builds the latest stable patch ISO for each minor when the object does not
+   exist yet.
+3. Uploads ISOs, SHA-256 files, and detached signatures to object storage.
+4. Regenerates the signed `CHECKSUM-<minor>` sets.
+5. Builds the static catalog and `manifest.json` from the bucket listing and
+   deploys both to GitHub Pages.
 
 Manual inputs:
 
-- `k8s_minor`: restrict the matrix to one minor, for example `1.33`.
+- `k8s_minor`: restrict the matrix to one minor, for example `1.34`.
 - `force_rebuild`: rebuild the object even if it already exists.
+- `register_cloudstack`: run the CloudStack sync after the Pages deploy
+  ([Manifest sync](cloudstack-integration.md#manifest-sync)).
 
 Use `force_rebuild` only for an unpublished or explicitly revoked object. A CKS
-ISO that has already been registered in CloudStack should be treated as
-immutable because CloudStack supported versions point at a specific URL and
-checksum.
+ISO that CloudStack has registered is immutable, because the supported version
+points at its URL and checksum.
+
+A failed run posts to `SLACK_CHANNEL_ID` with `SLACK_BOT_TOKEN`; leaving the
+variable unset disables the notification.
 
 ## Cloud Controller Manager Image
 
@@ -31,102 +87,60 @@ run publishes and prints the image digest in the run summary.
 
 The tag moves with each publish, and every publish yields a new digest. ISO
 builds use the digest set in `CCM_IMAGE`, so publishing alone changes no ISO.
-Switching ISOs to a new digest is a separate change to `CCM_IMAGE` and
-`CCM_SOURCE_COMMIT`
-([CloudStack integration](cloudstack-integration.md#pinned-controller-in-the-isos)).
+
+The ISO build and the nodes pull the image without credentials, so the GHCR
+package must be public. GitHub sets package visibility only in the package
+settings page (Danger Zone, Change visibility); a package does not inherit
+visibility from its repository.
 
 ## Artifact Storage
 
-GitHub stores the source, workflow, and static catalog. ISO artifacts live in
-S3-compatible object storage because GitHub is not a good fit for multi-GB
-tenant installation media.
+GitHub stores the source, workflows, and static catalog. ISO artifacts live in
+S3-compatible object storage, because each ISO is about 1 GB.
 
-Configure the object store with generic repository secrets:
-
-- `S3_ACCESS_KEY_ID`
-- `S3_SECRET_ACCESS_KEY`
-
-Configure the target with generic repository variables:
-
-- `S3_BUCKET`
-- `S3_ENDPOINT_URL`
-- `S3_PREFIX`
-- `ARTIFACT_BASE_URL`
-
-Grant the publish identity only the required object-store actions. For S3-style
-policy names, that means:
+Grant the publish identity only these object-store actions:
 
 - `s3:ListBucket` on the bucket, constrained to the configured prefix.
 - `s3:GetObject` on objects under the configured prefix for existence checks,
   checksum refresh, and catalog generation.
 - `s3:PutObject` on objects under the configured prefix for ISOs, SHA-256
   files, signatures, and per-minor checksum sets.
-- `s3:PutObject` on objects under `keys/` when the public signing keys and the
-  key transition statement are mirrored into object storage.
-- Multipart upload actions for large ISO writes: `s3:AbortMultipartUpload`,
-  `s3:ListMultipartUploadParts`, and `s3:ListBucketMultipartUploads`.
+- `s3:PutObject` on objects under `keys/` for the mirrored public signing keys
+  and key transition statement.
+- `s3:AbortMultipartUpload`, `s3:ListMultipartUploadParts`, and
+  `s3:ListBucketMultipartUploads` for multipart ISO uploads.
 
-The publish identity does not need object deletion, bucket policy, ACL,
-lifecycle, or bucket administration permissions.
+The publish identity needs no object deletion, bucket policy, ACL, lifecycle,
+or bucket administration permission.
 
-Current public object paths:
+Object layout under `<ARTIFACT_BASE_URL>/<S3_PREFIX>`:
 
-- `https://s3.runatlas.is/atlas-static-assets/cks/setup-v<version>-calico-amd64-x86_64.iso`
-- `https://s3.runatlas.is/atlas-static-assets/cks/setup-v<version>-calico-amd64-x86_64.iso.sha256`
-- `https://s3.runatlas.is/atlas-static-assets/cks/setup-v<version>-calico-amd64-x86_64.iso.asc`
-- `https://s3.runatlas.is/atlas-static-assets/cks/CHECKSUM-<minor>`
+- `setup-v<k8s>-calico-cs<major.minor>[-ccm<digest12>]-<arch>-<machine>.iso`
+- the same name with `.sha256` and `.asc`
+- `CHECKSUM-<minor>` and `CHECKSUM-<minor>.asc`
 
-ISOs built with a pinned cloud controller manager carry a `-ccm<digest12>`
-marker before the architecture
-([CloudStack integration](cloudstack-integration.md#pinned-controller-in-the-isos)).
-- `https://s3.runatlas.is/atlas-static-assets/cks/CHECKSUM-<minor>.asc`
-
-The GitHub Pages catalog and `manifest.json` are generated from the bucket
-listing. They do not publish index files back into object storage.
-
-## CloudStack Availability
-
-The scheduled workflow publishes and indexes artifacts. CloudStack registration
-uses the Pages manifest:
-
-- <https://runatlas-is.github.io/cks-images/manifest.json>
-- <https://runatlas-is.github.io/cks-images/cks/manifest.json>
-
-The preferred CloudStack integration is an internal pull job that verifies the
-manifest checksum signatures and calls the CloudStack API. The manual
-`register_cloudstack` workflow input runs the same sync from GitHub Actions
-through the `cloudstack-registration` environment when a CloudStack operator
-chooses that model.
-
-New ISOs should still be treated as immutable once published. When a CloudStack
-operator later registers a URL/checksum pair, changing the object under that URL
-invalidates the supported-version record.
+The catalog and `manifest.json` are generated from the bucket listing and are
+not written back to object storage.
 
 ## Signing
 
-Every ISO gets a detached GPG signature when the signing key is available in CI.
-`scripts/sign-artifacts.sh` also regenerates one signed checksum set per
-Kubernetes minor.
+Every ISO gets a detached GPG signature, and `scripts/sign-artifacts.sh`
+regenerates one signed checksum set per Kubernetes minor.
 
 The bucket prefix is shared storage, so presence in the bucket is not treated
 as provenance. The sign step only signs and lists an ISO when its digest is
 established by the current run's build manifest (emitted by the build job), by
 an entry in an already-published `CHECKSUM-<minor>` whose signature verifies
-against the pinned fingerprint, or by an existing `.asc` on the ISO that
-verifies against the pinned key. Any other ISO object under the prefix is
+against a trusted fingerprint, or by an existing `.asc` on the ISO that
+verifies against a trusted key. Any other ISO object under the prefix is
 skipped, excluded from the checksum sets, and fails the run so the object can
 be investigated and removed. When running the script outside CI, pass
 `BUILT_DIGESTS_FILE` (lines of `sha256  filename`) for ISOs that are not yet
 covered by a signed checksum set.
 
-Required GitHub secrets:
-
-- `GPG_PRIVATE_KEY_B64_2026`
-- `GPG_PASSPHRASE` if the key is passphrase protected
-
 ## Artifact Signing Keys
 
-Two keys are published. Both carry the user ID
+The published catalog uses two keys. Both carry the user ID
 `Atlas Cloud (Artifact Signing) <artifacts@runatlas.is>`.
 
 | Fingerprint | File | State |
@@ -159,7 +173,7 @@ never re-signed. The CloudStack sync pins the same pair through
 refuses a keyring holding any key outside it.
 
 Both public keys and the transition statement are committed under `keys/`,
-included in the GitHub Pages artifact, and synced to object storage under the
+included in the GitHub Pages artifact, and copied to object storage under the
 same names by the sign job.
 
 Retiring the previous key is a separate change: it drops the previous
@@ -171,41 +185,25 @@ verifying.
 
 ## Local Builds
 
-Local builds use the same script as CI:
+Local builds use the same script as CI
+([Building the images](../README.md#building-the-images)). To upload from a
+local run, also set the target and load the credentials from a secret store:
 
 ```bash
-export K8S_VERSION=1.33.11
-export CNI_VERSION=1.9.1
-export CRICTL_VERSION=1.36.0
-export CLOUDSTACK_VERSION=4.22.1.0
-export DASHBOARD_YAML_URL=https://raw.githubusercontent.com/kubernetes/dashboard/v2.7.0/aio/deploy/recommended.yaml
-export CNI_YAML_URL=https://raw.githubusercontent.com/projectcalico/calico/v3.32.1/manifests/calico.yaml
-
+export S3_BUCKET=<bucket>
+export S3_ENDPOINT_URL=https://s3.example.com
+export S3_PREFIX=cks/
+# AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY from the secret store
 ./scripts/build-iso.sh
 ```
 
-To build with the pinned cloud controller manager, also set `CCM_IMAGE` and
-`CCM_SOURCE_COMMIT` to the values in `.github/workflows/cks-images.yml`.
-
-To upload locally, also set:
+To refresh signatures and checksum sets for existing bucket objects:
 
 ```bash
-export AWS_ACCESS_KEY_ID=...
-export AWS_SECRET_ACCESS_KEY=...
-export S3_BUCKET=atlas-static-assets
-export S3_ENDPOINT_URL=https://s3.runatlas.is
+export AWS_ENDPOINT_URL=https://s3.example.com
+export BUCKET_NAME=<bucket>
 export S3_PREFIX=cks/
-```
-
-To refresh signatures/checksums for existing bucket objects:
-
-```bash
-export AWS_ACCESS_KEY_ID=...
-export AWS_SECRET_ACCESS_KEY=...
-export AWS_ENDPOINT_URL=https://s3.runatlas.is
-export BUCKET_NAME=atlas-static-assets
-export S3_PREFIX=cks/
-export SIGNING_KEY=artifacts@runatlas.is
-
+export SIGNING_KEY=<signing key user ID or fingerprint>
+# AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY from the secret store
 ./scripts/sign-artifacts.sh
 ```

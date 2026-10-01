@@ -25,7 +25,7 @@
 #   ETCD_VERSION          e.g. 3.5.15 (optional; 4.21+)
 #   OUTPUT_DIR            defaults to ./output
 #   S3_BUCKET             upload target; skip upload if unset
-#   S3_ENDPOINT_URL       e.g. https://s3.runatlas.is
+#   S3_ENDPOINT_URL       e.g. https://s3.example.com
 #   S3_PREFIX             key prefix inside bucket (default: cks/)
 #   GPG_PASSPHRASE        optional passphrase for SIGNING_KEY in CI
 #   UPSTREAM_REF          override the fetched apache/cloudstack ref; defaults

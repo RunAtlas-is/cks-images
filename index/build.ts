@@ -9,8 +9,8 @@
 //     required (read-only)
 //   DOCS_URL                  link shown in the header + footer
 //   S3_PREFIX                 object prefix for CKS artifacts (default: cks/)
-//   ARTIFACT_BASE_URL         public base URL for objects in BUCKET_NAME
-//   SITE_BASE_URL             public base URL for this GitHub Pages site
+//   ARTIFACT_BASE_URL         public base URL for objects in BUCKET_NAME (required)
+//   SITE_BASE_URL             public base URL for this GitHub Pages site (required)
 //   KEY_URL                   public URL for the current artifact signing key
 //   SIGNING_FINGERPRINT       current Atlas artifact key fingerprint (display only)
 //   PREVIOUS_KEY_URL          public URL for the previous artifact signing key
@@ -43,10 +43,8 @@ const S3_PREFIX = normalizePrefix(process.env.S3_PREFIX ?? "cks/");
 const DOCS_URL =
   process.env.DOCS_URL ??
   "https://github.com/RunAtlas-is/cks-images/blob/main/docs/cloudstack-integration.md";
-const ARTIFACT_BASE_URL =
-  process.env.ARTIFACT_BASE_URL ?? "https://s3.runatlas.is/atlas-static-assets";
-const SITE_BASE_URL =
-  process.env.SITE_BASE_URL ?? "https://runatlas-is.github.io/cks-images";
+const ARTIFACT_BASE_URL = need("ARTIFACT_BASE_URL");
+const SITE_BASE_URL = need("SITE_BASE_URL");
 // Both artifact signing keys are published: the current one signs new
 // artifacts, the previous one still verifies everything signed before the
 // rotation. The transition statement is signed by both. See docs/operations.md.
@@ -476,7 +474,7 @@ function renderHtml(args: {
   <a href="https://runatlas.is"><img src="logo.svg" alt="Atlas Cloud"></a>
   <h1>Index of /cks</h1>
 </header>
-<p>CloudStack Kubernetes Service binary ISOs for Atlas Cloud. Each <code>.iso</code> has a sibling SHA-256 and a GPG detached signature (collapsed into the filename as <code>(sha, .asc)</code>). Per-minor <code>CHECKSUM-&lt;minor&gt;</code> files are signed with the Atlas signing key (detached <code>.asc</code>). See the <a href="${escape(DOCS_URL)}">deploy tutorial</a>; support dates follow the official <a href="https://kubernetes.io/releases/patch-releases/">Kubernetes policy</a>.</p>
+<p>Apache CloudStack Kubernetes Service (CKS) binaries ISOs, published by Atlas Cloud. Each <code>.iso</code> has a sibling SHA-256 and a GPG detached signature (collapsed into the filename as <code>(sha, .asc)</code>). Per-minor <code>CHECKSUM-&lt;minor&gt;</code> files are signed with the Atlas signing key (detached <code>.asc</code>). See the <a href="${escape(DOCS_URL)}">CloudStack integration guide</a>; support dates follow the official <a href="https://kubernetes.io/releases/patch-releases/">Kubernetes policy</a>.</p>
 <div class="meta">
   <div class="body">
     <strong>Verify the set:</strong>
