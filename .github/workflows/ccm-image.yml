@@ -39,7 +39,7 @@ env:
   # names an image built from this workflow: the ISO takes its deployment
   # manifest from the same commit as the image.
   SOURCE_COMMIT: 5147f76478f66191513d8741ffd8800a35684fc2
-  IMAGE: ghcr.io/runatlas-is/cloudstack-kubernetes-provider
+  IMAGE: ghcr.io/runatlas-is/cks-images/cloudstack-kubernetes-provider
 
 jobs:
   build:

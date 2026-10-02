@@ -26,7 +26,7 @@ Atlas Cloud builds the active Kubernetes matrix daily and publishes it here:
 - Key transition statement, signed by both keys:
   <https://runatlas-is.github.io/cks-images/keys/atlas-artifact-signing-key-transition-2026.txt.asc>
 - Cloud controller manager image:
-  `ghcr.io/runatlas-is/cloudstack-kubernetes-provider`
+  `ghcr.io/runatlas-is/cks-images/cloudstack-kubernetes-provider`
 
 Artifact names state what each ISO contains:
 
