@@ -69,8 +69,8 @@ env:
   # names for every active minor on the next run, which the CloudStack sync
   # then registers in place of the current artifacts, so it is a production
   # change to new-cluster creation (docs/cloudstack-integration.md).
-  CCM_IMAGE: ""
-  CCM_SOURCE_COMMIT: ""
+  CCM_IMAGE: ghcr.io/runatlas-is/cks-images/cloudstack-kubernetes-provider@sha256:aeec863d50ff4e7915137ab8ef43ba35ea754c20f7bf5455ab46f104710ebe30
+  CCM_SOURCE_COMMIT: 5147f76478f66191513d8741ffd8800a35684fc2
 
 jobs:
   minors:
