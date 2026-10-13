@@ -170,6 +170,11 @@ which fails unless the file holds that one key with a revocation signature.
 The manifest lists it under `revokedKeys`, never under `signingKeys`, so the
 CloudStack sync does not import it.
 
+`gpg --verify` still reports a signature made by a revoked key as valid, with a
+warning, and exits 0. The fingerprint pins, not the revocation, stop the sign
+step and the CloudStack sync from accepting such a signature, so a revoked key
+never stays in either pin.
+
 The previous key certifies the current key, and the transition statement at
 `keys/atlas-artifact-signing-key-transition-2026.txt.asc` names both
 fingerprints and is signed by both keys. Its signature by the current key is
