@@ -137,7 +137,15 @@ an entry in an already-published `CHECKSUM-<minor>` whose signature verifies
 against a trusted fingerprint, or by an existing `.asc` on the ISO that
 verifies against a trusted key. Any other ISO object under the prefix is
 skipped, excluded from the checksum sets, and fails the run so the object can
-be investigated and removed. When running the script outside CI, pass
+be investigated and removed.
+
+An ISO whose detached signature was not made by the signing key, for example
+one signed before a key rotation, is downloaded, checked against its trusted
+digest and signed again with the current key. The issuer is read from the
+signature itself, so ISOs already signed by the current key are not
+downloaded.
+
+When running the script outside CI, pass
 `BUILT_DIGESTS_FILE` (lines of `sha256  filename`) for ISOs that are not yet
 covered by a signed checksum set.
 
@@ -169,11 +177,12 @@ gpg --verify keys/atlas-artifact-signing-key-transition-2026.txt.asc
 Signing uses the current key alone, pinned by `SIGNING_FINGERPRINT`
 (repository variable `GPG_SIGNING_FINGERPRINT_2026`). Verification accepts any
 key in `TRUSTED_FINGERPRINTS` (repository variable
-`GPG_TRUSTED_FINGERPRINTS`), which carries both fingerprints, so ISO
-signatures and checksum sets written before the rotation stay valid and are
-never re-signed. The CloudStack sync pins the same pair through
-`GPG_SIGNING_FINGERPRINT`, which accepts a comma- or space-separated list, and
-refuses a keyring holding any key outside it.
+`GPG_TRUSTED_FINGERPRINTS`), which carries both fingerprints, so checksum sets
+written before the rotation stay valid. ISO signatures made by the previous
+key are replaced by the sign step, as described under [Signing](#signing).
+The CloudStack sync pins the same pair through `GPG_SIGNING_FINGERPRINT`,
+which accepts a comma- or space-separated list, and refuses a keyring holding
+any key outside it.
 
 Both public keys and the transition statement are committed under `keys/`,
 included in the GitHub Pages artifact, and copied to object storage under the
@@ -182,9 +191,8 @@ same names by the sign job.
 Retiring the previous key is a separate change: it drops the previous
 fingerprint from `TRUSTED_FINGERPRINTS` and from the CloudStack pin, removes
 the key file from `keys/` and from object storage, and publishes a revocation
-certificate. Every artifact signed with the previous key must be re-signed with
-the current key before that change lands, because its signature stops
-verifying.
+certificate. It lands only after a sign run has replaced every ISO signature
+made by the previous key, because those signatures stop verifying.
 
 ## Local Builds
 

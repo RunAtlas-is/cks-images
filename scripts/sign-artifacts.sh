@@ -5,11 +5,12 @@
 # with a detached .asc signature so the per-minor sets can scale without a
 # single unbounded CHECKSUM.
 #
-# Signatures are produced by SIGNING_FINGERPRINT alone, but existing signatures
-# verify against any key in TRUSTED_FINGERPRINTS, which also carries the
-# previous artifact key. Artifacts signed before the rotation therefore keep
-# their provenance without being re-signed. Key list and rotation state:
-# docs/operations.md.
+# Signatures are produced by SIGNING_FINGERPRINT alone, but an existing
+# CHECKSUM-<minor> signature verifies against any key in TRUSTED_FINGERPRINTS,
+# so a checksum set written before a key rotation keeps its provenance. An ISO
+# signature made by any key other than SIGNING_FINGERPRINT is replaced with a
+# fresh one over the ISO's trusted digest, so every published ISO signature
+# converges on the signing key. Key list and rotation state: docs/operations.md.
 #
 # Provenance gate: the bucket prefix is shared and writable by more identities
 # than this pipeline, so presence in the bucket is not proof an object came
@@ -100,6 +101,32 @@ gpg_verify_pinned() {
       return 0
     fi
   done
+  return 1
+}
+
+# Fingerprints of the signing key and its subkeys. A detached signature names
+# its issuer, so an ISO signature made by any other key, such as one retired by
+# a key rotation, is found and replaced without downloading the ISO first.
+mapfile -t signing_key_fingerprints < <(
+  gpg --batch --with-colons --fingerprint "$SIGNING_FINGERPRINT" 2>/dev/null \
+    | awk -F: '$1 == "fpr" { print toupper($10) }'
+)
+if [[ ${#signing_key_fingerprints[@]} -eq 0 ]]; then
+  echo "!! signing key ${SIGNING_FINGERPRINT} is not in the keyring" >&2
+  exit 2
+fi
+
+# True when detached signature $1 carries a signature issued by the signing key
+# or one of its subkeys. The issuer is read from the signature packets, so the
+# payload is not needed.
+signed_by_signing_key() {
+  local packets issuer fpr
+  packets=$(gpg --batch --list-packets "$1" 2>/dev/null) || return 1
+  while read -r issuer; do
+    for fpr in "${signing_key_fingerprints[@]}"; do
+      [[ -n "$issuer" && "$fpr" == *"$issuer" ]] && return 0
+    done
+  done < <(grep -oE '(issuer fpr v4 [0-9A-F]{40}|keyid [0-9A-F]{16})' <<<"$packets" | awk '{print $NF}')
   return 1
 }
 
@@ -197,8 +224,14 @@ for iso in "${isos[@]}"; do
   fi
 
   if [[ "$has_asc" == true ]]; then
-    echo "[skip-sign] ${iso} already has ${asc}"
-    continue
+    aws "${aws_opts[@]}" s3 cp "s3://${BUCKET_NAME}/${S3_PREFIX}${asc}" "$tmp/download/${asc}" --only-show-errors
+    if signed_by_signing_key "$tmp/download/${asc}"; then
+      rm -f "$tmp/download/${asc}"
+      echo "[skip-sign] ${iso} already has ${asc}"
+      continue
+    fi
+    rm -f "$tmp/download/${asc}"
+    echo "[re-sign] ${iso}: ${asc} was not made by ${SIGNING_FINGERPRINT}"
   fi
 
   echo "[sign] ${iso}"
