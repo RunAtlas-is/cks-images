@@ -21,7 +21,8 @@ Atlas Cloud builds the active Kubernetes matrix daily and publishes it here:
 - Artifacts: <https://s3.runatlas.is/atlas-static-assets/cks/>
 - Signing key:
   <https://runatlas-is.github.io/cks-images/keys/atlas-cloud-artifact-signing-2026.asc>
-- Previous signing key, valid for artifacts signed before 2026-09-13:
+- Revoked previous signing key, published so that verifiers learn of the
+  revocation:
   <https://runatlas-is.github.io/cks-images/keys/atlas-cloud-artifact-signing.asc>
 - Key transition statement, signed by both keys:
   <https://runatlas-is.github.io/cks-images/keys/atlas-artifact-signing-key-transition-2026.txt.asc>

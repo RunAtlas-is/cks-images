@@ -40,3 +40,6 @@ jobs:
 
       - name: Compile Python scripts
         run: python3 -m py_compile scripts/*.py
+
+      - name: Check the revoked signing key
+        run: ./scripts/check-revoked-key.sh keys/atlas-cloud-artifact-signing.asc 4C2D72FDDEF77A5CC4A7D2C421CA4588DCB6991E

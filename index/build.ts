@@ -13,9 +13,9 @@
 //   SITE_BASE_URL             public base URL for this GitHub Pages site (required)
 //   KEY_URL                   public URL for the current artifact signing key
 //   SIGNING_FINGERPRINT       current Atlas artifact key fingerprint (display only)
-//   PREVIOUS_KEY_URL          public URL for the previous artifact signing key
-//   PREVIOUS_SIGNING_FINGERPRINT
-//                             previous Atlas artifact key fingerprint (display only)
+//   REVOKED_KEY_URL           public URL for the revoked artifact signing key
+//   REVOKED_SIGNING_FINGERPRINT
+//                             revoked Atlas artifact key fingerprint (display only)
 //   CKS_MIN_CPU               CloudStack mincpunumber in manifest (default: 2)
 //   CKS_MIN_MEMORY            CloudStack minmemory in manifest (default: 2048)
 //   CKS_DIRECT_DOWNLOAD       CloudStack directdownload in manifest (default: false)
@@ -45,16 +45,17 @@ const DOCS_URL =
   "https://github.com/RunAtlas-is/cks-images/blob/main/docs/cloudstack-integration.md";
 const ARTIFACT_BASE_URL = need("ARTIFACT_BASE_URL");
 const SITE_BASE_URL = need("SITE_BASE_URL");
-// Both artifact signing keys are published: the current one signs new
-// artifacts, the previous one still verifies everything signed before the
-// rotation. The transition statement is signed by both. See docs/operations.md.
+// The current key signs and verifies every published artifact. The previous
+// key is published only in its revoked form, so a consumer who refreshes it
+// stops trusting it; it is never offered as a signing key. The transition
+// statement is signed by both. See docs/operations.md.
 const KEY_PATH = "keys/atlas-cloud-artifact-signing-2026.asc";
-const PREVIOUS_KEY_PATH = "keys/atlas-cloud-artifact-signing.asc";
+const REVOKED_KEY_PATH = "keys/atlas-cloud-artifact-signing.asc";
 const TRANSITION_PATH = "keys/atlas-artifact-signing-key-transition-2026.txt.asc";
 const SIGNING_FINGERPRINT =
   process.env.SIGNING_FINGERPRINT ?? "4BB5C9F558FBD4A0981F07EF1A2D98FB5D036FC3";
-const PREVIOUS_SIGNING_FINGERPRINT =
-  process.env.PREVIOUS_SIGNING_FINGERPRINT ?? "4C2D72FDDEF77A5CC4A7D2C421CA4588DCB6991E";
+const REVOKED_SIGNING_FINGERPRINT =
+  process.env.REVOKED_SIGNING_FINGERPRINT ?? "4C2D72FDDEF77A5CC4A7D2C421CA4588DCB6991E";
 const CKS_MIN_CPU = Number(process.env.CKS_MIN_CPU ?? "2");
 const CKS_MIN_MEMORY = Number(process.env.CKS_MIN_MEMORY ?? "2048");
 const CKS_DIRECT_DOWNLOAD = /^true$/i.test(process.env.CKS_DIRECT_DOWNLOAD ?? "false");
@@ -72,7 +73,7 @@ const CCM_MARKER = /@sha256:([0-9a-f]{12})[0-9a-f]{52}$/.exec(process.env.CCM_IM
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DIST = process.env.DIST_DIR ?? join(HERE, "dist");
 const BRANDING = join(HERE, "assets");
-const PUBLISHED_KEY_FILES = [KEY_PATH, PREVIOUS_KEY_PATH, TRANSITION_PATH];
+const PUBLISHED_KEY_FILES = [KEY_PATH, REVOKED_KEY_PATH, TRANSITION_PATH];
 
 const s3 = new S3Client({
   region: "us-east-1",
@@ -216,8 +217,8 @@ function artifactHref(key: string): string {
 }
 
 const KEY_URL = process.env.KEY_URL ?? joinUrl(SITE_BASE_URL, KEY_PATH);
-const PREVIOUS_KEY_URL =
-  process.env.PREVIOUS_KEY_URL ?? joinUrl(SITE_BASE_URL, PREVIOUS_KEY_PATH);
+const REVOKED_KEY_URL =
+  process.env.REVOKED_KEY_URL ?? joinUrl(SITE_BASE_URL, REVOKED_KEY_PATH);
 const TRANSITION_URL = joinUrl(SITE_BASE_URL, TRANSITION_PATH);
 
 function formatTimestamp(d: Date): string {
@@ -326,6 +327,8 @@ function buildManifest(args: {
     },
     // signingKey names the key that signs new artifacts; signingKeys carries
     // every key a consumer needs to verify what is currently published.
+    // revokedKeys lists keys that must no longer be trusted, so a consumer can
+    // fetch the revocation; nothing published depends on them.
     signingKey: {
       url: KEY_URL,
       fingerprint: SIGNING_FINGERPRINT.toUpperCase(),
@@ -336,10 +339,12 @@ function buildManifest(args: {
         fingerprint: SIGNING_FINGERPRINT.toUpperCase(),
         status: "current",
       },
+    ],
+    revokedKeys: [
       {
-        url: PREVIOUS_KEY_URL,
-        fingerprint: PREVIOUS_SIGNING_FINGERPRINT.toUpperCase(),
-        status: "previous",
+        url: REVOKED_KEY_URL,
+        fingerprint: REVOKED_SIGNING_FINGERPRINT.toUpperCase(),
+        status: "revoked",
       },
     ],
     keyTransitionUrl: TRANSITION_URL,
@@ -497,9 +502,9 @@ sha256sum --check --ignore-missing CHECKSUM-1.33</pre>
     Atlas Cloud signing<br>
     ${formatFingerprint(SIGNING_FINGERPRINT)}<br>
     <br>
-    <a href="${escape(PREVIOUS_KEY_URL)}">KEY-previous.asc</a><br>
-    valid for artifacts signed before 2026-09-13<br>
-    ${formatFingerprint(PREVIOUS_SIGNING_FINGERPRINT)}<br>
+    <a href="${escape(REVOKED_KEY_URL)}">KEY-revoked.asc</a><br>
+    revoked; do not trust signatures made with it<br>
+    ${formatFingerprint(REVOKED_SIGNING_FINGERPRINT)}<br>
     <br>
     <a href="${escape(TRANSITION_URL)}">key transition statement</a>
   </div>

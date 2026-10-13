@@ -151,48 +151,58 @@ covered by a signed checksum set.
 
 ## Artifact Signing Keys
 
-The published catalog uses two keys. Both carry the user ID
+Both keys carry the user ID
 `Atlas Cloud (Artifact Signing) <artifacts@runatlas.is>`.
 
 | Fingerprint | File | State |
 | --- | --- | --- |
-| `4BB5C9F558FBD4A0981F07EF1A2D98FB5D036FC3` | `keys/atlas-cloud-artifact-signing-2026.asc` | current; signs new artifacts, expires 2028-09-12 |
-| `4C2D72FDDEF77A5CC4A7D2C421CA4588DCB6991E` | `keys/atlas-cloud-artifact-signing.asc` | valid for artifacts signed before 2026-09-13 |
+| `4BB5C9F558FBD4A0981F07EF1A2D98FB5D036FC3` | `keys/atlas-cloud-artifact-signing-2026.asc` | current; signs and verifies every published artifact, expires 2028-09-12 |
+| `4C2D72FDDEF77A5CC4A7D2C421CA4588DCB6991E` | `keys/atlas-cloud-artifact-signing.asc` | revoked; no published artifact depends on it |
 
 The current key is an ed25519 primary key that certifies only, with an ed25519
 signing subkey. `gpg --verify` reports the subkey fingerprint first and the
 primary fingerprint last, and the pipeline accepts a pin in either position.
 
-The previous key certifies the current key, so a consumer who already trusts
-the previous key can confirm the new one from the key material alone. The
-transition statement at `keys/atlas-artifact-signing-key-transition-2026.txt.asc`
-names both fingerprints and is signed by both keys:
+The previous key is published only in its revoked form, so a consumer who
+imports or refreshes it learns that it is revoked and stops trusting signatures
+made with it. CI and both publishing jobs run `scripts/check-revoked-key.sh`,
+which fails unless the file holds that one key with a revocation signature.
+The manifest lists it under `revokedKeys`, never under `signingKeys`, so the
+CloudStack sync does not import it.
+
+The previous key certifies the current key, and the transition statement at
+`keys/atlas-artifact-signing-key-transition-2026.txt.asc` names both
+fingerprints and is signed by both keys. Its signature by the current key is
+the one to rely on:
 
 ```bash
-gpg --import keys/atlas-cloud-artifact-signing.asc \
-             keys/atlas-cloud-artifact-signing-2026.asc
+gpg --import keys/atlas-cloud-artifact-signing-2026.asc
 gpg --verify keys/atlas-artifact-signing-key-transition-2026.txt.asc
 ```
 
 Signing uses the current key alone, pinned by `SIGNING_FINGERPRINT`
 (repository variable `GPG_SIGNING_FINGERPRINT_2026`). Verification accepts any
-key in `TRUSTED_FINGERPRINTS` (repository variable
-`GPG_TRUSTED_FINGERPRINTS`), which carries both fingerprints, so checksum sets
-written before the rotation stay valid. ISO signatures made by the previous
-key are replaced by the sign step, as described under [Signing](#signing).
-The CloudStack sync pins the same pair through `GPG_SIGNING_FINGERPRINT`,
-which accepts a comma- or space-separated list, and refuses a keyring holding
-any key outside it.
+key in `TRUSTED_FINGERPRINTS` (repository variable `GPG_TRUSTED_FINGERPRINTS`,
+unset by default), which defaults to the current key. The CloudStack sync pins
+its keys through `GPG_SIGNING_FINGERPRINT`, which accepts a comma- or
+space-separated list, and refuses a keyring holding any key outside it.
 
-Both public keys and the transition statement are committed under `keys/`,
-included in the GitHub Pages artifact, and copied to object storage under the
-same names by the sign job.
+Both public key files and the transition statement are committed under
+`keys/`, included in the GitHub Pages artifact, and copied to object storage
+under the same names by the sign job.
 
-Retiring the previous key is a separate change: it drops the previous
-fingerprint from `TRUSTED_FINGERPRINTS` and from the CloudStack pin, removes
-the key file from `keys/` and from object storage, and publishes a revocation
-certificate. It lands only after a sign run has replaced every ISO signature
-made by the previous key, because those signatures stop verifying.
+### Rotating the signing key
+
+1. Add the new key to `keys/`, sign it and a transition statement with the
+   outgoing key, and add its fingerprint to `TRUSTED_FINGERPRINTS` and to the
+   CloudStack pin beside the outgoing one.
+2. Switch `SIGNING_FINGERPRINT` to the new key. The next sign run signs every
+   checksum set and every ISO signature again with it, as described under
+   [Signing](#signing).
+3. Once no published signature names the outgoing key, replace its key file
+   with the revoked form and drop its fingerprint from `TRUSTED_FINGERPRINTS`,
+   the defaults in the scripts, and the CloudStack pin. Change the manifest
+   first: the CloudStack sync refuses a manifest key it does not pin.
 
 ## Local Builds
 
