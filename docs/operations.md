@@ -192,7 +192,8 @@ Retiring the previous key is a separate change: it drops the previous
 fingerprint from `TRUSTED_FINGERPRINTS` and from the CloudStack pin, removes
 the key file from `keys/` and from object storage, and publishes a revocation
 certificate. It lands only after a sign run has replaced every ISO signature
-made by the previous key, because those signatures stop verifying.
+made by the previous key, because gpg then reports each of those signatures as
+made by a revoked key.
 
 ## Local Builds
 
