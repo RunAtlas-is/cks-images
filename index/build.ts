@@ -471,7 +471,7 @@ function renderHtml(args: {
  </head>
  <body>
 <header>
-  <a href="https://runatlas.is"><img src="logo.svg" alt="Atlas Cloud"></a>
+  <a href="https://atlascloud.is"><img src="logo.svg" alt="Atlas Cloud"></a>
   <h1>Index of /cks</h1>
 </header>
 <p>Apache CloudStack Kubernetes Service (CKS) binaries ISOs, published by Atlas Cloud. Each <code>.iso</code> has a sibling SHA-256 and a GPG detached signature (collapsed into the filename as <code>(sha, .asc)</code>). Per-minor <code>CHECKSUM-&lt;minor&gt;</code> files are signed with the Atlas signing key (detached <code>.asc</code>). See the <a href="${escape(DOCS_URL)}">CloudStack integration guide</a>; support dates follow the official <a href="https://kubernetes.io/releases/patch-releases/">Kubernetes policy</a>.</p>
