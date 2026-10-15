@@ -30,6 +30,8 @@
 #   GPG_PASSPHRASE        optional passphrase for SIGNING_KEY in CI
 #   UPSTREAM_REF          override the fetched apache/cloudstack ref; defaults
 #                         to the CLOUDSTACK_VERSION release tag
+#   UPSTREAM_SHA256       SHA-256 of the fetched upstream script; defaults to
+#                         the digest recorded below for CLOUDSTACK_VERSION
 #   CCM_IMAGE             cloud controller manager image the ISO deploys, by
 #                         digest (<repository>@sha256:<64 hex>); unset keeps
 #                         the upstream manifest and its v1.2.0 image
@@ -50,6 +52,17 @@ OUTPUT_DIR="${OUTPUT_DIR:-./output}"
 S3_PREFIX="${S3_PREFIX:-cks/}"
 UPSTREAM_REF="${UPSTREAM_REF:-refs/tags/${CLOUDSTACK_VERSION}}"
 UPSTREAM_URL="https://raw.githubusercontent.com/apache/cloudstack/${UPSTREAM_REF}/scripts/util/create-kubernetes-binaries-iso.sh"
+# SHA-256 of the upstream script at each CloudStack release tag. A release
+# missing here fails the build: review the script at the new tag, then add
+# its digest. A different UPSTREAM_REF needs UPSTREAM_SHA256 set with it.
+declare -A UPSTREAM_SHA256_BY_VERSION=(
+  [4.22.1.0]=b03d0aa5b7026972d143d161e5faaff7752604e9c461db534eed19217bc6a4a1
+)
+UPSTREAM_SHA256="${UPSTREAM_SHA256:-${UPSTREAM_SHA256_BY_VERSION[${CLOUDSTACK_VERSION}]:-}}"
+if [[ ! "${UPSTREAM_SHA256}" =~ ^[0-9a-f]{64}$ ]]; then
+  echo "!! No SHA-256 recorded for the upstream script at CloudStack ${CLOUDSTACK_VERSION}" >&2
+  exit 1
+fi
 # Format marker: the CloudStack major.minor whose contract this ISO satisfies.
 CS_FORMAT="$(cut -d. -f1-2 <<<"${CLOUDSTACK_VERSION}")"
 
@@ -79,6 +92,7 @@ trap 'rm -rf "$workdir"' EXIT
 
 echo ">> Fetching upstream build script at ${UPSTREAM_REF}"
 curl -fsSL "$UPSTREAM_URL" -o "$workdir/create-kubernetes-binaries-iso.sh"
+echo "${UPSTREAM_SHA256}  $workdir/create-kubernetes-binaries-iso.sh" | sha256sum -c -
 chmod +x "$workdir/create-kubernetes-binaries-iso.sh"
 
 # Interface assertion: the released script takes a dashboard manifest URL as

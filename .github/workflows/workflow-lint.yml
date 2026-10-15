@@ -9,7 +9,9 @@ name: Workflow lint
 # Self-contained copy of the org's shared workflow lint. This repository is
 # public and GitHub does not allow a public repository to call a reusable
 # workflow that lives in a private one, so the caller pattern the private
-# repositories use cannot resolve here. Keep the two in sync.
+# repositories use cannot resolve here. Keep the two in sync. The pin check
+# that ends the job runs a copy of the shared checker, kept in
+# .github/scripts/pin-lint.ts with the commit it was copied from.
 #
 # Both tools install from a release tarball checked against a pinned SHA-256,
 # so a replaced release cannot change what runs here. Change the version and
@@ -34,7 +36,7 @@ permissions:
 jobs:
   workflow-lint:
     name: Workflow lint
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -83,3 +85,12 @@ jobs:
             --format github \
             --no-progress \
             .github/workflows
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+
+      - name: Pin lint
+        # Exemptions live in .github/pin-lint.yml.
+        run: bun .github/scripts/pin-lint.ts .
