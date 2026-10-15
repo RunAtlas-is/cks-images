@@ -31,13 +31,11 @@ except ImportError:  # pragma: no cover - exercised by shell validation.
 
 DEFAULT_MANIFEST_URL = "https://runatlas-is.github.io/cks-images/manifest.json"
 
-# Atlas Cloud artifact signing keys, current first. The pin lives here, outside
-# the manifest, so a tampered manifest cannot supply its own key and fingerprint
-# pair. The previous key stays pinned while artifacts signed before the rotation
-# are still published; see docs/operations.md.
+# Atlas Cloud artifact signing key. The pin lives here, outside the manifest, so
+# a tampered manifest cannot supply its own key and fingerprint pair. During a
+# key rotation the outgoing key is pinned beside it; see docs/operations.md.
 DEFAULT_SIGNING_FINGERPRINTS = (
     "4BB5C9F558FBD4A0981F07EF1A2D98FB5D036FC3",
-    "4C2D72FDDEF77A5CC4A7D2C421CA4588DCB6991E",
 )
 
 # Hosts this script is allowed to fetch from. The manifest lives on GitHub Pages

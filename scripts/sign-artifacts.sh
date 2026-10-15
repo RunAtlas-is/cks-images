@@ -5,9 +5,11 @@
 # with a detached .asc signature so the per-minor sets can scale without a
 # single unbounded CHECKSUM.
 #
-# Signatures are produced by SIGNING_FINGERPRINT alone, but an existing
+# Signatures are produced by SIGNING_FINGERPRINT alone. An existing
 # CHECKSUM-<minor> signature verifies against any key in TRUSTED_FINGERPRINTS,
-# so a checksum set written before a key rotation keeps its provenance. An ISO
+# which defaults to the signing key alone; during a key rotation it also names
+# the outgoing key, so a checksum set written before the rotation keeps its
+# provenance until the next run signs it again. An ISO
 # signature made by any key other than SIGNING_FINGERPRINT is replaced with a
 # fresh one over the ISO's trusted digest, so every published ISO signature
 # converges on the signing key. Key list and rotation state: docs/operations.md.
@@ -41,7 +43,7 @@
 #                        (default: the current Atlas artifact key above)
 #   TRUSTED_FINGERPRINTS pinned fingerprints accepted when verifying an
 #                        existing signature, separated by spaces or commas
-#                        (default: the current and previous artifact keys)
+#                        (default: the signing key alone)
 #   BUILT_DIGESTS_FILE   manifest of ISOs built by the current run
 #   GNUPGHOME            keyring location (default: $HOME/.gnupg-atlas)
 #   GPG_PASSPHRASE       optional passphrase for SIGNING_KEY in CI
@@ -57,7 +59,7 @@ SIGNING_KEY="${SIGNING_KEY:-artifacts@runatlas.is}"
 SIGNING_FINGERPRINT="${SIGNING_FINGERPRINT:-4BB5C9F558FBD4A0981F07EF1A2D98FB5D036FC3}"
 SIGNING_FINGERPRINT="${SIGNING_FINGERPRINT//[[:space:]]/}"
 SIGNING_FINGERPRINT="${SIGNING_FINGERPRINT^^}"
-TRUSTED_FINGERPRINTS="${TRUSTED_FINGERPRINTS:-${SIGNING_FINGERPRINT} 4C2D72FDDEF77A5CC4A7D2C421CA4588DCB6991E}"
+TRUSTED_FINGERPRINTS="${TRUSTED_FINGERPRINTS:-${SIGNING_FINGERPRINT}}"
 read -r -a trusted_fingerprints <<< "${TRUSTED_FINGERPRINTS//,/ }"
 trusted_fingerprints=("${trusted_fingerprints[@]^^}")
 S3_PREFIX="${S3_PREFIX:-cks/}"
