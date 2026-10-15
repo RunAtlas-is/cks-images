@@ -1,6 +1,6 @@
 // Copy of .github/actions/pin-lint/scripts/pin-lint.ts from the RunAtlas-is
 // organization's shared .github repository, commit
-// 0c70342c2d76bee0d42aabfc6c95166d43e85be5. This repository is public and
+// 736623560c48bd45d97a4f5bd3f858f91aa485ab. This repository is public and
 // cannot run that private repository's action, so it runs this copy. Update
 // it by copying a newer revision whole and changing the commit above.
 
@@ -280,9 +280,13 @@ function scanRunnerLabels(path: string, lines: string[], findings: Finding[]): v
   });
 }
 
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\-]/g, "\\$&");
+}
+
 // Default of a `workflow_call` or composite-action input, if declared in the file.
 function inputDefault(lines: string[], name: string): string | undefined {
-  const pattern = new RegExp(`^(\\s*)${name.replace(/[-.]/g, "\\$&")}:\\s*$`);
+  const pattern = new RegExp(`^(\\s*)${escapeRegExp(name)}:\\s*$`);
   for (let i = 0; i < lines.length; i++) {
     const match = pattern.exec(lines[i]);
     if (!match) continue;
@@ -349,7 +353,7 @@ function scanSetupSteps(path: string, lines: string[], findings: Finding[]): voi
   });
 }
 
-const CURL_PIPE_SHELL = /\b(curl|wget)\b[^\n|]*\|\s*(?:sudo\s+(?:-\S+\s+)*)?(?:env\s+(?:\S+=\S*\s+)*)?(?:ba|z|da|k)?sh\b/;
+const CURL_PIPE_SHELL = /\b(curl|wget)\b[^\n|]*\|\s*(?:sudo\s+(?:-\S+\s+)*)?(?:env\s+(?:[^\s=]+=\S*\s+)*)?(?:ba|z|da|k)?sh\b/;
 const ARTIFACT_URL = /https?:\/\/\S*(\/releases\/download\/|\.(tar\.gz|tgz|tar\.xz|tar\.zst|tar\.bz2|zip|deb|rpm|apk|AppImage|bin|exe|msi|jar|whl)\b)/;
 const LATEST_URL = /https?:\/\/\S*\/releases\/latest\b/;
 // Commands that verify a download. An image digest nearby is not one.
