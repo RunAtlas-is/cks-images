@@ -92,7 +92,7 @@ test("composes the real notification with escaped PR and job text", () => {
       runUrl: "https://github.com/RunAtlas-is/example/actions/runs/1",
     }),
   ).toBe(
-    "<!channel> Dependabot PR checks failed in RunAtlas-is/example: <https://github.com/RunAtlas-is/example/pull/42|#42 Bump one &amp; &lt;two&gt;> \u2014 <https://github.com/RunAtlas-is/example/actions/runs/1|CI &lt;required&gt;> (failed jobs: lint &amp; test)",
+    "Dependabot PR checks failed in RunAtlas-is/example: <https://github.com/RunAtlas-is/example/pull/42|#42 Bump one &amp; &lt;two&gt;> \u2014 <https://github.com/RunAtlas-is/example/actions/runs/1|CI &lt;required&gt;> (failed jobs: lint &amp; test)",
   );
 });
 
@@ -233,4 +233,30 @@ test("fails loudly when Slack returns ok false", async () => {
   expect(runNotifier(baseEnv, dependencies)).rejects.toThrow(
     "Slack chat.postMessage failed: not_authed",
   );
+});
+
+test("joins the channel and retries when the bot is not a member", async () => {
+  const replies = [
+    { ok: false, error: "not_in_channel" },
+    { ok: true },
+    { ok: true, ts: "123.456" },
+  ];
+  const requests: { url: string; body: unknown }[] = [];
+  const dependencies: NotifyDependencies = {
+    fetch: (async (input, init) => {
+      requests.push({ url: String(input), body: JSON.parse(String(init?.body)) });
+      return jsonResponse(replies.shift());
+    }) as typeof fetch,
+    log: () => {},
+    warn: () => {},
+  };
+
+  await runNotifier(baseEnv, dependencies);
+
+  expect(requests.map((request) => request.url)).toEqual([
+    "https://slack.com/api/chat.postMessage",
+    "https://slack.com/api/conversations.join",
+    "https://slack.com/api/chat.postMessage",
+  ]);
+  expect(requests[1].body).toEqual({ channel: "C123" });
 });

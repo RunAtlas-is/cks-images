@@ -105,7 +105,7 @@ export function composeFailureMessage(context: {
   const jobsNote = context.failedJobs
     ? ` (failed jobs: ${escapeSlack(context.failedJobs)})`
     : "";
-  return `<!channel> Dependabot PR checks failed in ${context.repo}: ${pr} \u2014 <${context.runUrl}|${escapeSlack(context.workflowName)}>${jobsNote}`;
+  return `Dependabot PR checks failed in ${context.repo}: ${pr} \u2014 <${context.runUrl}|${escapeSlack(context.workflowName)}>${jobsNote}`;
 }
 
 function requireValue(
@@ -261,31 +261,51 @@ async function composeMessage(
   });
 }
 
+async function callSlack(
+  method: string,
+  body: Record<string, unknown>,
+  env: NotifyEnvironment,
+  dependencies: NotifyDependencies,
+): Promise<SlackResponse> {
+  const response = await dependencies.fetch(`https://slack.com/api/${method}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${env.SLACK_BOT_TOKEN}`,
+      "Content-Type": "application/json; charset=utf-8",
+    },
+    body: JSON.stringify(body),
+  });
+  return responseJson<SlackResponse>(response, `Slack ${method}`);
+}
+
+// The bot joins the public channel on first use (channels:join), so moving
+// SLACK_CHANNEL_ID needs no manual invite.
 async function postToSlack(
   text: string,
   env: NotifyEnvironment,
   dependencies: NotifyDependencies,
 ): Promise<void> {
-  const response = await dependencies.fetch(
-    "https://slack.com/api/chat.postMessage",
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${env.SLACK_BOT_TOKEN}`,
-        "Content-Type": "application/json; charset=utf-8",
-      },
-      body: JSON.stringify({
-        channel: env.SLACK_CHANNEL_ID,
-        text,
-        unfurl_links: false,
-        unfurl_media: false,
-      }),
-    },
-  );
-  const result = await responseJson<SlackResponse>(
-    response,
-    "Slack chat.postMessage",
-  );
+  const message = {
+    channel: env.SLACK_CHANNEL_ID,
+    text,
+    unfurl_links: false,
+    unfurl_media: false,
+  };
+  let result = await callSlack("chat.postMessage", message, env, dependencies);
+  if (result.ok !== true && result.error === "not_in_channel") {
+    const joined = await callSlack(
+      "conversations.join",
+      { channel: env.SLACK_CHANNEL_ID },
+      env,
+      dependencies,
+    );
+    if (joined.ok !== true) {
+      throw new Error(
+        `Slack conversations.join failed: ${joined.error ?? "unknown error"}`,
+      );
+    }
+    result = await callSlack("chat.postMessage", message, env, dependencies);
+  }
   if (result.ok !== true) {
     throw new Error(
       `Slack chat.postMessage failed: ${result.error ?? "unknown error"}`,

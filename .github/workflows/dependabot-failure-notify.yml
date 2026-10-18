@@ -9,8 +9,8 @@ name: Dependabot failure notify
 # in sync when the notifier changes.
 #
 # Manual test: run from the Actions tab (workflow_dispatch) with `test`
-# checked. That posts a clearly labeled test message without <!channel> so
-# nobody gets tagged, verifying the token, channel, and posting mechanics.
+# checked. That posts a clearly labeled test message, verifying the token,
+# channel, and posting mechanics.
 
 on:
   workflow_run:
@@ -19,7 +19,7 @@ on:
   workflow_dispatch:
     inputs:
       test:
-        description: Post a test message (no channel tag) to verify posting.
+        description: Post a test message to verify posting.
         required: true
         type: boolean
         default: true
