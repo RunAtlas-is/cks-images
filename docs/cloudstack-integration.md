@@ -168,7 +168,7 @@ Use one CloudStack supported version per Kubernetes patch version.
 Verify the artifact against its signed checksum set, then register it:
 
 ```bash
-BASE=https://s3.runatlas.is/atlas-static-assets/cks
+BASE=https://s3.atlascloud.is/atlas-static-assets/cks
 MINOR=1.34
 ISO=setup-v1.34.12-calico-cs4.22-amd64-x86_64.iso
 

@@ -9,8 +9,8 @@ name: Dependabot failure notify
 # in sync when the notifier changes.
 #
 # Manual test: run from the Actions tab (workflow_dispatch) with `test`
-# checked. That posts a clearly labeled test message without <!channel> so
-# nobody gets tagged, verifying the token, channel, and posting mechanics.
+# checked. That posts a clearly labeled test message, verifying the token,
+# channel, and posting mechanics.
 
 on:
   workflow_run:
@@ -19,7 +19,7 @@ on:
   workflow_dispatch:
     inputs:
       test:
-        description: Post a test message (no channel tag) to verify posting.
+        description: Post a test message to verify posting.
         required: true
         type: boolean
         default: true
@@ -40,7 +40,7 @@ jobs:
        github.event.workflow_run.conclusion == 'failure' &&
        github.event.workflow_run.actor.login == 'dependabot[bot]') ||
       (github.event_name == 'workflow_dispatch' && inputs.test))
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -48,6 +48,8 @@ jobs:
           persist-credentials: false
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
 
       - name: Notify Slack
         env:

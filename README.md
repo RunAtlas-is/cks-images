@@ -18,7 +18,7 @@ Atlas Cloud builds the active Kubernetes matrix daily and publishes it here:
 - Catalog: <https://runatlas-is.github.io/cks-images/>
 - Manifest for automated registration:
   <https://runatlas-is.github.io/cks-images/manifest.json>
-- Artifacts: <https://s3.runatlas.is/atlas-static-assets/cks/>
+- Artifacts: <https://s3.atlascloud.is/atlas-static-assets/cks/>
 - Signing key:
   <https://runatlas-is.github.io/cks-images/keys/atlas-cloud-artifact-signing-2026.asc>
 - Revoked previous signing key, published so that verifiers learn of the

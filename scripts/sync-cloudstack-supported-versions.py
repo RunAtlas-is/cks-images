@@ -40,14 +40,17 @@ DEFAULT_SIGNING_FINGERPRINTS = (
 
 # Hosts this script is allowed to fetch from. The manifest lives on GitHub Pages
 # (runatlas-is.github.io); the signing key defaults to the same site; checksum
-# sets, signatures, and image artifacts live in object storage (s3.runatlas.is).
+# sets, signatures, and image artifacts live in object storage, served on both
+# s3.atlascloud.is and s3.runatlas.is.
 # Every URL reaching urlopen originates as either an operator/CI-provided URL or
 # a manifest-derived one, and its content is separately GPG-verified against the
 # pinned fingerprint above. This allowlist is defence in depth: it refuses any
 # scheme other than https or any host outside the trusted set before a request
 # is ever made. Operators pointing --manifest-url/--key-url at an alternate
 # mirror can extend the set via CKS_ALLOWED_HOSTS (comma-separated hostnames).
-ALLOWED_FETCH_HOSTS = frozenset({"runatlas-is.github.io", "s3.runatlas.is"})
+ALLOWED_FETCH_HOSTS = frozenset(
+    {"runatlas-is.github.io", "s3.atlascloud.is", "s3.runatlas.is"}
+)
 
 
 def _allowed_fetch_hosts() -> frozenset[str]:
