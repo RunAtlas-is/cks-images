@@ -28,6 +28,7 @@ import {
 import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { supportMapFrom, type SupportMap } from "./lifecycle.ts";
 
 const need = (k: string): string => {
   const v = process.env[k];
@@ -86,8 +87,6 @@ const s3 = new S3Client({
 });
 
 type Entry = { key: string; size: number; modified: Date };
-type SupportEntry = { maintenance?: string; eol?: string };
-type SupportMap = Record<string, SupportEntry>;
 type ParsedIso = {
   major: number;
   minor: number;
@@ -167,13 +166,7 @@ async function fetchSupportMap(): Promise<SupportMap> {
         signal: AbortSignal.timeout(15_000),
       });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const arr = (await r.json()) as Array<{ cycle?: string; support?: string; eol?: string }>;
-      const out: SupportMap = {};
-      for (const e of arr) {
-        if (!e.cycle) continue;
-        out[e.cycle] = { maintenance: e.support, eol: e.eol };
-      }
-      return out;
+      return supportMapFrom(await r.json());
     } catch (err) {
       lastError = err;
       if (attempt < 4) {
@@ -366,7 +359,7 @@ function dateDisplay(iso: string | undefined): string {
 
 function dateCell(iso: string | undefined): { display: string; sortKey: string } {
   if (!iso) return { display: "&mdash;", sortKey: "9999-99-99" };
-  return { display: dateDisplay(iso), sortKey: iso };
+  return { display: dateDisplay(iso), sortKey: escape(iso) };
 }
 
 function formatFingerprint(fpr: string): string {

@@ -32,6 +32,10 @@ jobs:
         working-directory: index
         run: bunx tsc --noEmit
 
+      - name: Test index
+        working-directory: index
+        run: bun test
+
       - name: Lint shell scripts
         run: |
           set -euo pipefail
