@@ -150,6 +150,13 @@ jobs:
           # The runner image ships the AWS CLI; fail loudly if that changes
           # rather than installing an unverified build.
           command -v aws >/dev/null 2>&1 || { echo "aws CLI is missing from the runner image" >&2; exit 1; }
+          aws --version
+          # aws-cli resolves `s3` transfers to the CRT client by default since
+          # v2.38.0, and the CRT client's GetObject requests fail
+          # SignatureDoesNotMatch against Ceph RGW. Pin the classic client for
+          # every transfer:
+          # https://docs.aws.amazon.com/cli/latest/topic/s3-config.html#preferred-transfer-client
+          aws configure set default.s3.preferred_transfer_client classic
 
       - name: Import signing key
         run: |
@@ -296,6 +303,9 @@ jobs:
           # The runner image ships the AWS CLI; fail loudly if that changes
           # rather than installing an unverified build.
           command -v aws >/dev/null 2>&1 || { echo "aws CLI is missing from the runner image" >&2; exit 1; }
+          aws --version
+          # Classic transfer client for Ceph RGW; see the build job.
+          aws configure set default.s3.preferred_transfer_client classic
 
       - name: Import signing key
         run: |
