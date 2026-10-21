@@ -2,10 +2,4 @@
 # `--persona regular --min-severity medium`; this file holds every waiver, so
 # the full exception list reads in one place.
 
-rules:
-  dangerous-triggers:
-    ignore:
-      # The notifier reacts to a finished run of another workflow, which no
-      # other trigger reports. It reads the run's conclusion and actor, and
-      # never checks out or executes the head revision.
-      - dependabot-failure-notify.yml
+rules: {}

@@ -5,6 +5,18 @@ interface WorkflowRun {
   updated_at: string;
 }
 
+interface WorkflowRunDetail extends WorkflowRun {
+  status: string;
+  event: string;
+  head_sha: string;
+  head_branch: string | null;
+  html_url: string;
+  actor: { login: string } | null;
+  repository: { full_name: string };
+  head_repository: { full_name: string } | null;
+  pull_requests: Array<{ number: number }>;
+}
+
 interface WorkflowRunsResponse {
   workflow_runs: WorkflowRun[];
 }
@@ -25,18 +37,13 @@ interface SlackResponse {
 }
 
 export interface NotifyEnvironment {
-  GITHUB_EVENT_NAME: string;
+  NOTIFY_TEST: string;
   GH_TOKEN: string;
   REPO: string;
   SLACK_BOT_TOKEN: string;
   SLACK_CHANNEL_ID: string;
   CI_WORKFLOWS?: string;
   RUN_ID?: string;
-  HEAD_SHA?: string;
-  WORKFLOW_NAME?: string;
-  RUN_URL?: string;
-  HEAD_BRANCH?: string;
-  PR_NUMBER?: string;
   GITHUB_API_URL?: string;
 }
 
@@ -44,13 +51,19 @@ export interface NotifyDependencies {
   fetch: typeof fetch;
   log: (message: string) => void;
   warn: (message: string) => void;
+  sleep: (milliseconds: number) => Promise<void>;
 }
 
 const defaultDependencies: NotifyDependencies = {
   fetch,
   log: console.log,
   warn: console.warn,
+  sleep: (milliseconds) => Bun.sleep(milliseconds),
 };
+
+const DEPENDABOT_LOGIN = "dependabot[bot]";
+const COMPLETION_POLL_INTERVAL_MS = 15_000;
+const COMPLETION_POLL_ATTEMPTS = 20;
 
 export function parseWorkflowNames(value: string): string[] {
   return value
@@ -78,6 +91,36 @@ export function shouldPostForRuns(
       (run.updated_at < current.updated_at ||
         (run.updated_at === current.updated_at && run.id < current.id)),
   );
+}
+
+// The notifier is dispatched by name and run ID, so anyone allowed to dispatch
+// it chooses the run. Only a run that GitHub itself reports as a Dependabot
+// pull request run of a CI workflow, from a branch of this repository, is
+// eligible; a fork's run never is, whatever actor it reports.
+export function rejectionReason(
+  run: WorkflowRunDetail,
+  repo: string,
+  workflowNames: string[],
+): string | undefined {
+  if (run.repository.full_name !== repo) {
+    return `run belongs to ${run.repository.full_name}`;
+  }
+  if (run.head_repository?.full_name !== repo) {
+    return "run head is not a branch of this repository";
+  }
+  if (run.event !== "pull_request") {
+    return `run event is ${run.event}`;
+  }
+  if (run.actor?.login !== DEPENDABOT_LOGIN) {
+    return "run actor is not Dependabot";
+  }
+  if (!workflowNames.includes(run.name)) {
+    return `workflow ${run.name} is not a CI workflow`;
+  }
+  if (run.conclusion !== "failure") {
+    return `run concluded ${run.conclusion ?? "without a conclusion"}`;
+  }
+  return undefined;
 }
 
 const SLACK_ESCAPE_MAP: Record<string, string> = {
@@ -151,17 +194,13 @@ async function githubJson<T>(
 }
 
 async function suppressDuplicate(
+  run: WorkflowRunDetail,
+  workflowNames: string[],
   env: NotifyEnvironment,
   dependencies: NotifyDependencies,
 ): Promise<boolean> {
-  const workflowNames = parseWorkflowNames(env.CI_WORKFLOWS ?? "");
-  if (workflowNames.length === 0) {
-    dependencies.log("No ci-workflows list; suppression disabled.");
-    return false;
-  }
-
-  const runId = Number(requireValue(env, "RUN_ID"));
-  const headSha = requireValue(env, "HEAD_SHA");
+  const runId = run.id;
+  const headSha = run.head_sha;
   try {
     const query = new URLSearchParams({
       head_sha: headSha,
@@ -202,19 +241,41 @@ async function optionalGithubJson<T>(
   }
 }
 
+async function waitForCompletedRun(
+  runId: string,
+  env: NotifyEnvironment,
+  dependencies: NotifyDependencies,
+): Promise<WorkflowRunDetail> {
+  for (let attempt = 1; ; attempt += 1) {
+    const run = await githubJson<WorkflowRunDetail>(
+      `/repos/${env.REPO}/actions/runs/${runId}`,
+      "get workflow run",
+      env,
+      dependencies,
+    );
+    if (run.status === "completed") {
+      return run;
+    }
+    if (attempt >= COMPLETION_POLL_ATTEMPTS) {
+      throw new Error(`Run ${runId} did not complete; status ${run.status}`);
+    }
+    await dependencies.sleep(COMPLETION_POLL_INTERVAL_MS);
+  }
+}
+
 async function composeMessage(
+  run: WorkflowRunDetail,
   env: NotifyEnvironment,
   dependencies: NotifyDependencies,
 ): Promise<string> {
-  if (env.GITHUB_EVENT_NAME === "workflow_dispatch") {
-    return `[test] Dependabot failure notifier dry run from ${env.REPO}: posting mechanics verified, no CI actually failed. Ignore this message.`;
-  }
-
-  let prNumber = env.PR_NUMBER ?? "";
+  const branch = run.head_branch ?? "";
+  let prNumber = run.pull_requests[0]?.number
+    ? String(run.pull_requests[0].number)
+    : "";
   if (!prNumber) {
     const owner = env.REPO.split("/", 1)[0];
     const query = new URLSearchParams({
-      head: `${owner}:${env.HEAD_BRANCH ?? ""}`,
+      head: `${owner}:${branch}`,
       state: "all",
       per_page: "1",
     });
@@ -239,7 +300,7 @@ async function composeMessage(
   }
 
   const jobs = await optionalGithubJson<JobsResponse>(
-    `/repos/${env.REPO}/actions/runs/${requireValue(env, "RUN_ID")}/jobs?per_page=100`,
+    `/repos/${env.REPO}/actions/runs/${run.id}/jobs?per_page=100`,
     "list workflow jobs",
     env,
     dependencies,
@@ -254,10 +315,10 @@ async function composeMessage(
     repo: env.REPO,
     prNumber,
     prTitle,
-    branch: env.HEAD_BRANCH ?? "",
-    workflowName: env.WORKFLOW_NAME ?? "",
+    branch,
+    workflowName: run.name,
     failedJobs,
-    runUrl: env.RUN_URL ?? "",
+    runUrl: run.html_url,
   });
 }
 
@@ -320,20 +381,41 @@ export async function runNotifier(
 ): Promise<void> {
   const env: NotifyEnvironment = {
     ...sourceEnv,
-    GITHUB_EVENT_NAME: requireValue(sourceEnv, "GITHUB_EVENT_NAME"),
+    NOTIFY_TEST: sourceEnv.NOTIFY_TEST ?? "false",
     GH_TOKEN: requireValue(sourceEnv, "GH_TOKEN"),
     REPO: requireValue(sourceEnv, "REPO"),
     SLACK_BOT_TOKEN: requireValue(sourceEnv, "SLACK_BOT_TOKEN"),
     SLACK_CHANNEL_ID: requireValue(sourceEnv, "SLACK_CHANNEL_ID"),
   };
 
-  if (
-    env.GITHUB_EVENT_NAME === "workflow_run" &&
-    (await suppressDuplicate(env, dependencies))
-  ) {
+  if (env.NOTIFY_TEST === "true") {
+    await postToSlack(
+      `[test] Dependabot failure notifier dry run from ${env.REPO}: posting mechanics verified, no CI actually failed. Ignore this message.`,
+      env,
+      dependencies,
+    );
     return;
   }
-  const text = await composeMessage(env, dependencies);
+
+  const runId = requireValue(env, "RUN_ID");
+  if (!/^[1-9][0-9]*$/.test(runId)) {
+    throw new Error("RUN_ID must be a workflow run ID");
+  }
+  const workflowNames = parseWorkflowNames(env.CI_WORKFLOWS ?? "");
+  if (workflowNames.length === 0) {
+    throw new Error("CI_WORKFLOWS names no workflow");
+  }
+
+  const run = await waitForCompletedRun(runId, env, dependencies);
+  const reason = rejectionReason(run, env.REPO, workflowNames);
+  if (reason) {
+    dependencies.warn(`::warning::Not notifying for run ${runId}: ${reason}.`);
+    return;
+  }
+  if (await suppressDuplicate(run, workflowNames, env, dependencies)) {
+    return;
+  }
+  const text = await composeMessage(run, env, dependencies);
   await postToSlack(text, env, dependencies);
 }
 
