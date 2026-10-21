@@ -36,7 +36,7 @@ permissions: {}
 
 jobs:
   notify:
-    if: vars.SLACK_CHANNEL_ID != ''
+    if: vars.SLACK_CHANNEL_ID != '' && (inputs.test || inputs.run_id != '')
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
