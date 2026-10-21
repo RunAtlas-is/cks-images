@@ -1,21 +1,24 @@
 name: Dependabot failure notify
 
-# Self-contained copy of the org Dependabot failure notifier. This repository
-# is public and GitHub does not allow a public repository to call reusable
-# workflows or actions that live in the private RunAtlas-is/.github repository,
-# so the caller pattern used by the private repos cannot resolve here. The
-# script is a verbatim vendor of
-# RunAtlas-is/.github/.github/actions/dependabot-failure-notify; keep the two
-# in sync when the notifier changes.
+# Posts to Slack when CI fails on a Dependabot pull request. The CI workflow
+# dispatches this workflow on the default branch with the failed run's ID, so
+# the Slack token is only ever exposed to workflow and script code from the
+# default branch, never to a pull request's revision. The script reads the run
+# back from the API and posts only for a failed Dependabot pull request run of
+# CI from a branch of this repository; event payload fields never reach it.
 #
-# Manual test: run from the Actions tab (workflow_dispatch) with `test`
-# checked. That posts a clearly labeled test message, verifying the token,
-# channel, and posting mechanics.
+# Self-contained variant of the org Dependabot failure notifier
+# (RunAtlas-is/.github/.github/actions/dependabot-failure-notify). This
+# repository is public and GitHub does not allow a public repository to call
+# reusable workflows or actions that live in a private repository, and it takes
+# a dispatched run ID instead of a workflow_run event. Keep the message format
+# and duplicate suppression in step with the org notifier.
+#
+# Manual test: run from the Actions tab with `test` checked. That posts a
+# clearly labeled test message, verifying the token, channel, and posting
+# mechanics.
 
 on:
-  workflow_run:
-    workflows: ["CI"]
-    types: [completed]
   workflow_dispatch:
     inputs:
       test:
@@ -23,25 +26,23 @@ on:
         required: true
         type: boolean
         default: true
+      run_id:
+        description: ID of the failed CI run to report.
+        required: false
+        type: string
+        default: ""
 
-permissions:
-  actions: read
-  contents: read
-  pull-requests: read
-
-env:
-  SLACK_CHANNEL_ID: ${{ vars.SLACK_CHANNEL_ID }}
+permissions: {}
 
 jobs:
   notify:
-    if: >-
-      vars.SLACK_CHANNEL_ID != '' && (
-      (github.event_name == 'workflow_run' &&
-       github.event.workflow_run.conclusion == 'failure' &&
-       github.event.workflow_run.actor.login == 'dependabot[bot]') ||
-      (github.event_name == 'workflow_dispatch' && inputs.test))
+    if: vars.SLACK_CHANNEL_ID != ''
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -55,12 +56,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL_ID: ${{ vars.SLACK_CHANNEL_ID }}
           CI_WORKFLOWS: "CI"
           REPO: ${{ github.repository }}
-          RUN_ID: ${{ github.event.workflow_run.id }}
-          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
-          WORKFLOW_NAME: ${{ github.event.workflow_run.name }}
-          RUN_URL: ${{ github.event.workflow_run.html_url }}
-          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
-          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+          NOTIFY_TEST: ${{ inputs.test }}
+          RUN_ID: ${{ inputs.run_id }}
         run: bun .github/scripts/dependabot-failure-notify.ts
