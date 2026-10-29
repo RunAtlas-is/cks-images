@@ -416,8 +416,6 @@ jobs:
       contents: read
     env:
       CLOUDSTACK_ENDPOINT: ${{ vars.CLOUDSTACK_ENDPOINT }}
-      CLOUDSTACK_API_KEY: ${{ secrets.CLOUDSTACK_API_KEY }}
-      CLOUDSTACK_SECRET_KEY: ${{ secrets.CLOUDSTACK_SECRET_KEY }}
       CLOUDSTACK_ZONE_IDS: ${{ vars.CLOUDSTACK_ZONE_IDS || vars.CLOUDSTACK_ZONE_ID }}
       CKS_MANIFEST_URL: ${{ vars.CKS_MANIFEST_URL }}
       CKS_ARCH: ${{ vars.CKS_ARCH || 'x86_64' }}
@@ -437,9 +435,15 @@ jobs:
           sudo apt-get install -y --no-install-recommends ca-certificates gnupg python3-pip python3-venv
           mkdir -p .cache
           python3 -m venv .cache/cloudstack-venv
-          .cache/cloudstack-venv/bin/python -m pip install cs==5.1.0
+          .cache/cloudstack-venv/bin/python -m pip install --require-hashes --only-binary :all: \
+            -r scripts/cloudstack-requirements.txt
 
+      # The API keys reach only this step, which runs the client installed
+      # above from hash-pinned wheels.
       - name: Sync CloudStack supported versions
+        env:
+          CLOUDSTACK_API_KEY: ${{ secrets.CLOUDSTACK_API_KEY }}
+          CLOUDSTACK_SECRET_KEY: ${{ secrets.CLOUDSTACK_SECRET_KEY }}
         run: |
           set -euo pipefail
           test -n "${CLOUDSTACK_ENDPOINT}" || { echo "CLOUDSTACK_ENDPOINT is missing" >&2; exit 1; }

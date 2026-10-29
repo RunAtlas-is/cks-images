@@ -7,6 +7,14 @@ updates:
     cooldown:
       default-days: 14
 
+  # The hash-pinned CloudStack client in scripts/cloudstack-requirements.txt.
+  - package-ecosystem: "uv"
+    directory: "/scripts"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 14
+
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
