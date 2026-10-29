@@ -1,0 +1,3 @@
+# The CloudStack API client the registration scripts import.
+# cloudstack-requirements.txt pins it and its dependencies by hash.
+cs==5.1.0

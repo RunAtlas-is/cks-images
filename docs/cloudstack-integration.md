@@ -185,7 +185,7 @@ comes from that key's signing subkey. Then register the URL and checksum with
 `addKubernetesSupportedVersion`, or with the helper:
 
 ```bash
-python3 -m pip install cs
+python3 -m pip install --require-hashes -r scripts/cloudstack-requirements.txt
 CLOUDSTACK_ENDPOINT=https://cloudstack.example.com/client/api \
 python3 scripts/register-cloudstack-version.py \
   --version 1.34.12 \
@@ -223,7 +223,7 @@ Environment:
 
 ```bash
 python3 -m venv .cache/cloudstack-venv
-.cache/cloudstack-venv/bin/python -m pip install cs
+.cache/cloudstack-venv/bin/python -m pip install --require-hashes -r scripts/cloudstack-requirements.txt
 
 .cache/cloudstack-venv/bin/python scripts/sync-cloudstack-supported-versions.py \
   --latest-per-minor --disable-superseded --disable-eol --fail-on-stalled \
