@@ -1,0 +1,28 @@
+name: Dependabot alert watch
+
+# Fixes open Dependabot alerts that have no open Dependabot pull request,
+# such as a security update whose job failed, in one pull request where it
+# can, asks a language model for dependency edits where only such an edit
+# resolves an alert, and reports the rest to Slack. See the reusable
+# workflow's header comment for what it fixes and reports.
+
+on:
+  schedule:
+    - cron: "17 1,7,13,19 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  watch:
+    permissions:
+      contents: read
+      pull-requests: read
+      vulnerability-alerts: read
+    uses: RunAtlas-is/.github/.github/workflows/dependabot-alert-watch.yml@dd4e5f5924fc975c83796b8556d77863cd31eeef # v1.2.1
+    secrets:
+      SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+      ATLAS_AGENT_APP_ID: ${{ secrets.ATLAS_AGENT_APP_ID }}
+      ATLAS_AGENT_PRIVATE_KEY: ${{ secrets.ATLAS_AGENT_PRIVATE_KEY }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
