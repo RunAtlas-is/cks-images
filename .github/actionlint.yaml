@@ -1,0 +1,6 @@
+paths:
+  .github/workflows/dependabot-alert-watch.yml:
+    ignore:
+      # The shared alert watch reads Dependabot alerts under this scope, which
+      # the pinned actionlint release does not list.
+      - 'unknown permission scope "vulnerability-alerts"'
