@@ -20,7 +20,7 @@ jobs:
       contents: read
       pull-requests: read
       vulnerability-alerts: read
-    uses: RunAtlas-is/.github/.github/workflows/dependabot-alert-watch.yml@0d606520c12154071456d749d9b31eb0b7903d80 # v1.2.0
+    uses: RunAtlas-is/.github/.github/workflows/dependabot-alert-watch.yml@dd4e5f5924fc975c83796b8556d77863cd31eeef # v1.2.1
     secrets:
       SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
       ATLAS_AGENT_APP_ID: ${{ secrets.ATLAS_AGENT_APP_ID }}
