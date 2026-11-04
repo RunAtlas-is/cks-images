@@ -178,9 +178,9 @@ charset-normalizer==3.5.2 \
     --hash=sha256:fd1fbe0f116b6e55da77aca2c6ddcddcfac2186cbf78bdebf40fc156efca389d \
     --hash=sha256:fe9753dfee015c570d73df76f899f18444d41388bffcde097deba51c4fadbb9f
     # via requests
-cs==5.1.0 \
-    --hash=sha256:a35876c45618e1373d7797d09b56b652e2bef096e585894c98aa84797cd85614 \
-    --hash=sha256:dcfa2ab6103dcbd3a53f9f5d40731b4addd6a5a30f0d905ee80479a1e73df852
+cs==5.2.0 \
+    --hash=sha256:87da7f883c9e28415ccee73dd81a80c4efaa63648a2695b302c7b5f2f0344cb0 \
+    --hash=sha256:dd357fc6d538822634845f5e216cbb04fe95cedf0c5edf727bdc2bc4044dcdc6
     # via -r cloudstack-requirements.in
 idna==3.20 \
     --hash=sha256:a7db850025b95ded1eae8a46181a1a6c56c92c96f0e2b005d9ff8dc0210cab44 \
@@ -189,10 +189,6 @@ idna==3.20 \
 requests==2.34.2 \
     --hash=sha256:2a0d60c172f83ac6ab31e4554906c0f3b3588d37b5cb939b1c061f4907e278e0 \
     --hash=sha256:f288924cae4e29463698d6d60bc6a4da69c89185ad1e0bcc4104f584e960b9ed
-    # via cs
-tzdata==2026.5 \
-    --hash=sha256:8cc73c0a0bfca7dbfa59235d60b2eff82231dee33f53d206db1acd9173cfc0a7 \
-    --hash=sha256:b683bd1b6659ddcd810ff02ad09ba821d4bf1065072805063eb35c49617905ac
     # via cs
 urllib3==2.8.0 \
     --hash=sha256:0cf3cae568d36aa9576b28dfb35f11328f1cb974ca7647d9475ebb86c75ac6e3 \
