@@ -16,8 +16,6 @@
 #   CNI_VERSION           e.g. 1.9.1
 #   CRICTL_VERSION        e.g. 1.36.0
 #   CNI_YAML_URL          e.g. Calico manifest URL
-#   DASHBOARD_YAML_URL    kubernetes-dashboard manifest the ISO embeds,
-#                         e.g. .../dashboard/v2.7.0/aio/deploy/recommended.yaml
 #   CLOUDSTACK_VERSION    deployed CloudStack release, e.g. 4.22.1.0
 #
 # Optional env:
@@ -44,7 +42,6 @@ set -euo pipefail
 : "${CNI_VERSION:?CNI_VERSION is required}"
 : "${CRICTL_VERSION:?CRICTL_VERSION is required}"
 : "${CNI_YAML_URL:?CNI_YAML_URL is required}"
-: "${DASHBOARD_YAML_URL:?DASHBOARD_YAML_URL is required}"
 : "${CLOUDSTACK_VERSION:?CLOUDSTACK_VERSION is required}"
 
 ARCH="${ARCH:-amd64}"
@@ -101,7 +98,7 @@ chmod +x "$workdir/create-kubernetes-binaries-iso.sh"
 # Headlamp version argument, so a wrong ref would silently build an ISO the
 # deployed release cannot finish provisioning. Refuse anything that does not
 # present the classic contract; a CloudStack upgrade that changes the
-# contract must update this script and DASHBOARD_YAML_URL deliberately.
+# contract must update this script and manifests/dashboard.yaml deliberately.
 if ! grep -q 'DASHBOARD_YAML_CONFIG' "$workdir/create-kubernetes-binaries-iso.sh"; then
   echo "!! Upstream script at ${UPSTREAM_REF} does not take DASHBOARD_YAML_CONFIG;" >&2
   echo "!! its ISO layout does not match the CloudStack ${CLOUDSTACK_VERSION} contract." >&2
@@ -133,6 +130,14 @@ if [[ -n "${CCM_MARKER}" ]]; then
   echo ">> Cloud controller manager: ${CCM_IMAGE} (manifest from ${CCM_SOURCE_COMMIT})"
 fi
 
+# The ISO carries manifests/dashboard.yaml, a stand-in that satisfies the
+# release's dashboard wait without running the Kubernetes Dashboard.
+dashboard_manifest="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/manifests/dashboard.yaml"
+if [[ ! -s "$dashboard_manifest" ]]; then
+  echo "!! Missing $dashboard_manifest" >&2
+  exit 1
+fi
+
 echo ">> Building ISO for k8s=$K8S_VERSION arch=$ARCH cloudstack=$CLOUDSTACK_VERSION"
 "$workdir/create-kubernetes-binaries-iso.sh" \
   "$OUTPUT_DIR" \
@@ -140,7 +145,7 @@ echo ">> Building ISO for k8s=$K8S_VERSION arch=$ARCH cloudstack=$CLOUDSTACK_VER
   "$CNI_VERSION" \
   "$CRICTL_VERSION" \
   "$CNI_YAML_URL" \
-  "$DASHBOARD_YAML_URL" \
+  "file://${dashboard_manifest}" \
   "$BUILD_NAME" \
   "$ARCH" \
   ${ETCD_VERSION:+"$ETCD_VERSION"}
