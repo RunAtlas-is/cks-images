@@ -36,6 +36,24 @@ marker. Upgrading CloudStack across a format boundary means bumping
 `CLOUDSTACK_VERSION`, rebuilding the active matrix under the new marker, and
 letting the sync register the rebuilt artifacts and retire the drifted ones.
 
+### Kubernetes Dashboard
+
+The ISOs carry no Kubernetes Dashboard: the v2.7.0 dashboard is archived
+upstream and ran with a cluster-admin ServiceAccount. CloudStack 4.22 still
+applies `dashboard.yaml` on a control node's first boot and on every Kubernetes
+upgrade, and cluster creation waits for a Running `kubernetes-dashboard` pod, so
+the ISO's `dashboard.yaml` is [`manifests/dashboard.yaml`](../manifests/dashboard.yaml):
+a pause container under that name with no ServiceAccount token, no Service and
+no API access. An upgrade replaces a running v2.7.0 dashboard Deployment with
+the stand-in; the old dashboard's ServiceAccount, Services, RBAC and metrics
+scraper stay until removed by hand.
+
+CloudStack itself, not the ISO, creates the ClusterRoleBinding
+`kubernetes-dashboard-ui`, which grants cluster-admin to the ServiceAccount
+`kubernetes-dashboard/kubernetes-dashboard`. The stand-in creates no such
+ServiceAccount, so the binding grants nothing, but anyone who can create that
+ServiceAccount gains cluster-admin. Delete the binding after creating a cluster.
+
 ## CloudStack API Address
 
 The ISOs carry no CloudStack API address. When CKS creates a cluster, it stores

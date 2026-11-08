@@ -1,0 +1,57 @@
+# Stand-in for the Kubernetes Dashboard, which this project does not ship.
+# CloudStack 4.22 applies dashboard.yaml from the ISO on a control node's first
+# boot and on every Kubernetes upgrade, and cluster creation waits for a
+# Running pod in namespace kubernetes-dashboard whose name contains
+# kubernetes-dashboard. This pause container satisfies that wait with no
+# ServiceAccount token, no Service and no API access. The Deployment keeps the
+# v2.7.0 name, selector and container name, so an upgrade's kubectl apply
+# replaces a running v2.7.0 dashboard in place.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kubernetes-dashboard
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kubernetes-dashboard
+  namespace: kubernetes-dashboard
+  labels:
+    k8s-app: kubernetes-dashboard
+spec:
+  replicas: 1
+  revisionHistoryLimit: 1
+  selector:
+    matchLabels:
+      k8s-app: kubernetes-dashboard
+  template:
+    metadata:
+      labels:
+        k8s-app: kubernetes-dashboard
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65535
+        runAsGroup: 65535
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: kubernetes-dashboard
+          image: registry.k8s.io/pause:3.10
+          resources:
+            requests:
+              cpu: 1m
+              memory: 8Mi
+            limits:
+              memory: 16Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          effect: NoSchedule

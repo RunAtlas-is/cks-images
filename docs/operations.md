@@ -34,7 +34,7 @@ Repository variables:
 | `S3_PREFIX` | no, default `cks/` | key prefix of the artifacts |
 | `DOCS_URL` | no | documentation link in the catalog; defaults to this repository's integration guide |
 | `CLOUDSTACK_VERSION` | no, default `4.22.1.0` | CloudStack release the ISOs target |
-| `CNI_VERSION`, `CRICTL_VERSION`, `CNI_YAML_URL`, `DASHBOARD_YAML_URL` | no | bundled component versions |
+| `CNI_VERSION`, `CRICTL_VERSION`, `CNI_YAML_URL` | no | bundled component versions |
 | `SLACK_CHANNEL_ID` | no | Slack channel for failure notifications; unset disables them |
 
 The two fingerprint variables default to the keys committed under `keys/`. A
