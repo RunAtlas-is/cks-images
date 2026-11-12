@@ -65,7 +65,7 @@ export K8S_VERSION=1.34.12
 export CNI_VERSION=1.9.1
 export CRICTL_VERSION=1.36.0
 export CLOUDSTACK_VERSION=4.22.1.0
-export CNI_YAML_URL=https://raw.githubusercontent.com/projectcalico/calico/v3.32.1/manifests/calico.yaml
+export CNI_YAML_URL=https://raw.githubusercontent.com/projectcalico/calico/v3.32.3/manifests/calico.yaml
 
 ./scripts/build-iso.sh
 ```
