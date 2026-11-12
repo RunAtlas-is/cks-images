@@ -61,7 +61,7 @@ env:
   # which images the manifest offers to the registry sync. Bump it together
   # with a CloudStack management upgrade, never independently.
   CLOUDSTACK_VERSION: ${{ vars.CLOUDSTACK_VERSION || '4.22.1.0' }}
-  CNI_YAML_URL: ${{ vars.CNI_YAML_URL || 'https://raw.githubusercontent.com/projectcalico/calico/v3.32.1/manifests/calico.yaml' }}
+  CNI_YAML_URL: ${{ vars.CNI_YAML_URL || 'https://raw.githubusercontent.com/projectcalico/calico/v3.32.3/manifests/calico.yaml' }}
   # Cloud controller manager the ISOs deploy, by digest, and the
   # apache/cloudstack-kubernetes-provider commit whose deployment.yaml carries
   # it (the ccm-image workflow builds and publishes that image). Empty keeps
