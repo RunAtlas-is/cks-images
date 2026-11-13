@@ -48,11 +48,14 @@ no API access. An upgrade replaces a running v2.7.0 dashboard Deployment with
 the stand-in; the old dashboard's ServiceAccount, Services, RBAC and metrics
 scraper stay until removed by hand.
 
-CloudStack itself, not the ISO, creates the ClusterRoleBinding
-`kubernetes-dashboard-ui`, which grants cluster-admin to the ServiceAccount
-`kubernetes-dashboard/kubernetes-dashboard`. The stand-in creates no such
-ServiceAccount, so the binding grants nothing, but anyone who can create that
-ServiceAccount gains cluster-admin. Delete the binding after creating a cluster.
+On first boot CloudStack creates the ClusterRoleBinding
+`kubernetes-dashboard-ui`, granting cluster-admin to the ServiceAccount
+`kubernetes-dashboard/kubernetes-dashboard`, unless a binding of that name
+already exists. The stand-in manifest creates it first with no subjects, so on
+a cluster built from these ISOs it grants nothing. Its `roleRef` stays
+`cluster-admin`, since `roleRef` cannot change and a different one would fail
+an upgrade's apply on a cluster whose binding CloudStack created. On such an
+older cluster, delete the binding by hand.
 
 ## CloudStack API Address
 

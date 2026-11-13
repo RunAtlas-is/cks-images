@@ -6,6 +6,14 @@
 # ServiceAccount token, no Service and no API access. The Deployment keeps the
 # v2.7.0 name, selector and container name, so an upgrade's kubectl apply
 # replaces a running v2.7.0 dashboard in place.
+#
+# CloudStack runs `kubectl create clusterrolebinding kubernetes-dashboard-ui
+# --clusterrole=cluster-admin` after applying this file on first boot and
+# ignores the error when the binding exists. Shipping that binding here with
+# no subjects means it exists first and grants nothing; neither the stand-in
+# nor CloudStack's pod check needs any API access. roleRef stays cluster-admin
+# because roleRef is immutable: an upgrade that re-applies this file to a
+# cluster whose binding CloudStack created would otherwise fail the apply.
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -55,3 +63,13 @@ spec:
       tolerations:
         - key: node-role.kubernetes.io/control-plane
           effect: NoSchedule
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kubernetes-dashboard-ui
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects: []
