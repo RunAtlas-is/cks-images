@@ -118,7 +118,7 @@ or bucket administration permission.
 
 Object layout under `<ARTIFACT_BASE_URL>/<S3_PREFIX>`:
 
-- `setup-v<k8s>-calico-cs<major.minor>[-ccm<digest12>]-<arch>-<machine>.iso`
+- `setup-v<k8s>-calico<calico>-cs<major.minor>[-ccm<digest12>]-<arch>-<machine>.iso`
 - the same name with `.sha256` and `.asc`
 - `CHECKSUM-<minor>` and `CHECKSUM-<minor>.asc`
 

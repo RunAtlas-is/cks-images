@@ -137,7 +137,7 @@ name `CCM_IMAGE` or that lacks the image archive, and the artifact name carries
 the first 12 hex digits of the image digest:
 
 ```text
-setup-v<k8s>-calico-cs<major.minor>-ccm<digest12>-<arch>-<machine>.iso
+setup-v<k8s>-calico<calico>-cs<major.minor>-ccm<digest12>-<arch>-<machine>.iso
 ```
 
 The ISO build pulls the image anonymously, and nodes run it from the ISO's
