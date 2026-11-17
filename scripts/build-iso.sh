@@ -81,7 +81,16 @@ if [[ -n "${CCM_IMAGE:-}" ]]; then
     exit 1
   fi
 fi
-BUILD_NAME="setup-v${K8S_VERSION}-calico-cs${CS_FORMAT}${CCM_MARKER}-${ARCH}"
+# Calico marker: the Calico release of CNI_YAML_URL, so a changed Calico pin
+# yields a new artifact URL that the daily build makes and the CloudStack sync
+# registers, instead of matching the object already built for this Kubernetes
+# version. The workflow's object key derives the same marker.
+if [[ ! "${CNI_YAML_URL}" =~ /calico/v([0-9]+\.[0-9]+\.[0-9]+)/ ]]; then
+  echo "!! CNI_YAML_URL must name a Calico release (/calico/v<x.y.z>/), got ${CNI_YAML_URL}" >&2
+  exit 1
+fi
+CALICO_VERSION="${BASH_REMATCH[1]}"
+BUILD_NAME="setup-v${K8S_VERSION}-calico${CALICO_VERSION}-cs${CS_FORMAT}${CCM_MARKER}-${ARCH}"
 
 mkdir -p "$OUTPUT_DIR"
 workdir="$(mktemp -d)"

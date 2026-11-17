@@ -209,8 +209,14 @@ jobs:
             ccm_digest="${CCM_IMAGE##*@sha256:}"
             ccm_marker="-ccm${ccm_digest:0:12}"
           fi
+          # Same Calico marker as scripts/build-iso.sh.
+          if [[ ! "${CNI_YAML_URL}" =~ /calico/v([0-9]+\.[0-9]+\.[0-9]+)/ ]]; then
+            echo "CNI_YAML_URL must name a Calico release (/calico/v<x.y.z>/): ${CNI_YAML_URL}" >&2
+            exit 1
+          fi
+          calico_version="${BASH_REMATCH[1]}"
           echo "k8s_version=$latest" >> "$GITHUB_OUTPUT"
-          echo "object_key=${prefix}setup-v${latest}-calico-cs${cs_format}${ccm_marker}-amd64-x86_64.iso" >> "$GITHUB_OUTPUT"
+          echo "object_key=${prefix}setup-v${latest}-calico${calico_version}-cs${cs_format}${ccm_marker}-amd64-x86_64.iso" >> "$GITHUB_OUTPUT"
 
       - name: Check existing object
         id: existing

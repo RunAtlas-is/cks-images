@@ -32,11 +32,11 @@ Atlas Cloud builds the active Kubernetes matrix daily and publishes it here:
 Artifact names state what each ISO contains:
 
 ```text
-setup-v<k8s>-calico-cs<major.minor>[-ccm<digest12>]-<arch>-<machine>.iso
+setup-v<k8s>-calico<calico>-cs<major.minor>[-ccm<digest12>]-<arch>-<machine>.iso
 ```
 
-`cs<major.minor>` is the CloudStack release whose ISO layout the image follows,
-and `-ccm<digest12>` names the first 12 hex digits of the controller image
+`calico<calico>` is the Calico release the ISO installs, `cs<major.minor>` is
+the CloudStack release whose ISO layout the image follows, and `-ccm<digest12>` names the first 12 hex digits of the controller image
 digest the ISO deploys. An ISO without the `-ccm` marker deploys the upstream
 v1.2.0 controller, which exits for every account that is not a root admin
 ([Cloud controller manager](docs/cloudstack-integration.md#cloud-controller-manager)).
